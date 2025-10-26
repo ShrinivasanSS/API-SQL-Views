@@ -170,8 +170,8 @@ class AppConfig:
                 title="Traces",
                 input_path=PROJECT_ROOT
                 / "sample_inputs"
-                / "trraces"
-                / "api_15698000397185121_rca.json",
+                / "traces"
+                / "api_isp_traceroute_15698000397185121.json",
                 rule_path=PROJECT_ROOT
                 / "sample_transformation_rules"
                 / "isp_trace_transformation.rules",
