@@ -1,0 +1,28 @@
+{
+    "code": 0,
+    "message": "success",
+    "data": {
+        "Seattle": {
+            "trace_output": "Failure;Reason=rca.traceroute.failuretraceroute to 192.0.2.1 (192.0.2.1), 30 hops max, 60 byte packets<BR>1 45-14-115-1.veportal.net (192.0.2.1) [as27323] 0.341 ms 0.406 ms 0.573 ms<BR>2 192.0.2.1 (192.0.2.1) [*] 0.454 ms 0.508 ms 0.610 ms<BR>3 192.0.2.1 (192.0.2.1) [as5740/as23033] 0.450 ms 0.462 ms 0.452 ms<BR>4 192.0.2.1 (192.0.2.1) [as5740/as23033] 0.334 ms 0.317 ms 0.375 ms<BR>5 192.0.2.1 (192.0.2.1) [as174] 1.375 ms 1.076 ms 1.047 ms<BR>6 be2077.ccr22.sfo01.atlas.cogentco.com (192.0.2.1) [as174] 18.091 ms 18.071 ms 18.089 ms<BR>7 be3670.ccr41.sjc03.atlas.cogentco.com (192.0.2.1) [as174] 19.311 ms 19.164 ms 19.299 ms<BR>8 * * *<BR>9 * * *<BR>10 192.0.2.1 (192.0.2.1) [as6453] <mpls:l=576992,e=2,s=1,t=1> '-12' 28.568 ms * *<BR>11 if-ae-34-2.tcore2.lvw-losangeles.as6453.net (192.0.2.1) [as6453] 28.139 ms 28.214 ms 28.184 ms<BR>12 192.0.2.1 (192.0.2.1) [as6453] '-18' 256.565 ms 257.779 ms 269.259 ms<BR>13 * * *<BR>14 192.0.2.1.static-delhi.vsnl.net.in (192.0.2.1) [as4755] '-21' 278.200 ms 278.712 ms 277.939 ms<BR>15 * * *<BR>16 192.0.2.1.static-delhi.vsnl.net.in (192.0.2.1) [as4755] '-22' 280.336 ms 278.271 ms 281.481 ms<BR>17 * * *<BR>18 * * *<BR>19 * * *<BR>20 * * *<BR>21 * * *<BR>22 * * *<BR>23 * * *<BR>24 * * *<BR>25 * * *<BR>26 * * *<BR>27 * * *<BR>28 * * *<BR>29 * * *<BR>30 * * *",
+            "asnDetails": "{&quot;192.0.2.1&quot;:{&quot;cc&quot;:&quot;US&quot;,&quot;registry&quot;:&quot;ripencc&quot;,&quot;as&quot;:&quot;27323&quot;,&quot;bgp prefix&quot;:&quot;192.0.2.1/24&quot;,&quot;ip&quot;:&quot;192.0.2.1&quot;,&quot;as name&quot;:&quot;SERVERSTADIUM, US&quot;,&quot;allocated&quot;:&quot;2019-05-08&quot;},&quot;192.0.2.1&quot;:{&quot;cc&quot;:&quot;US&quot;,&quot;registry&quot;:&quot;arin&quot;,&quot;as&quot;:&quot;6453&quot;,&quot;bgp prefix&quot;:&quot;192.0.2.1/19&quot;,&quot;ip&quot;:&quot;192.0.2.1&quot;,&quot;as name&quot;:&quot;AS6453, US&quot;,&quot;allocated&quot;:&quot;1996-04-15&quot;},&quot;192.0.2.1&quot;:{&quot;cc&quot;:&quot;US&quot;,&quot;registry&quot;:&quot;arin&quot;,&quot;as&quot;:&quot;174&quot;,&quot;bgp prefix&quot;:&quot;192.0.2.1/8&quot;,&quot;ip&quot;:&quot;192.0.2.1&quot;,&quot;as name&quot;:&quot;COGENT-174, US&quot;,&quot;allocated&quot;:&quot;1991-04-16&quot;},&quot;192.0.2.1&quot;:{&quot;cc&quot;:&quot;US&quot;,&quot;registry&quot;:&quot;arin&quot;,&quot;as&quot;:&quot;6453&quot;,&quot;bgp prefix&quot;:&quot;192.0.2.1/19&quot;,&quot;ip&quot;:&quot;192.0.2.1&quot;,&quot;as name&quot;:&quot;AS6453, US&quot;,&quot;allocated&quot;:&quot;1996-04-15&quot;},&quot;192.0.2.1&quot;:{&quot;cc&quot;:&quot;US&quot;,&quot;registry&quot;:&quot;arin&quot;,&quot;as&quot;:&quot;174&quot;,&quot;bgp prefix&quot;:&quot;192.0.2.1/12&quot;,&quot;ip&quot;:&quot;192.0.2.1&quot;,&quot;as name&quot;:&quot;COGENT-174, US&quot;,&quot;allocated&quot;:&quot;1992-02-05&quot;},&quot;192.0.2.1&quot;:{&quot;cc&quot;:&quot;&quot;,&quot;registry&quot;:&quot;other&quot;,&quot;as&quot;:&quot;NA&quot;,&quot;bgp prefix&quot;:&quot;NA&quot;,&quot;ip&quot;:&quot;192.0.2.1&quot;,&quot;as name&quot;:&quot;NA&quot;,&quot;allocated&quot;:&quot;&quot;},&quot;192.0.2.1&quot;:{&quot;cc&quot;:&quot;US&quot;,&quot;registry&quot;:&quot;arin&quot;,&quot;as&quot;:&quot;23033&quot;,&quot;bgp prefix&quot;:&quot;192.0.2.1/19&quot;,&quot;ip&quot;:&quot;192.0.2.1&quot;,&quot;as name&quot;:&quot;WOW, US&quot;,&quot;allocated&quot;:&quot;1999-09-29&quot;},&quot;192.0.2.1&quot;:{&quot;cc&quot;:&quot;US&quot;,&quot;registry&quot;:&quot;arin&quot;,&quot;as&quot;:&quot;174&quot;,&quot;bgp prefix&quot;:&quot;192.0.2.1/12&quot;,&quot;ip&quot;:&quot;192.0.2.1&quot;,&quot;as name&quot;:&quot;COGENT-174, US&quot;,&quot;allocated&quot;:&quot;1992-02-05&quot;},&quot;192.0.2.1&quot;:{&quot;cc&quot;:&quot;IN&quot;,&quot;registry&quot;:&quot;apnic&quot;,&quot;as&quot;:&quot;4755&quot;,&quot;bgp prefix&quot;:&quot;192.0.2.1/23&quot;,&quot;ip&quot;:&quot;192.0.2.1&quot;,&quot;as name&quot;:&quot;TATACOMM-AS TATA Communications formerly VSNL is Leading ISP, IN&quot;,&quot;allocated&quot;:&quot;2008-07-30&quot;},&quot;192.0.2.1&quot;:{&quot;cc&quot;:&quot;IN&quot;,&quot;registry&quot;:&quot;apnic&quot;,&quot;as&quot;:&quot;4755&quot;,&quot;bgp prefix&quot;:&quot;192.0.2.1/23&quot;,&quot;ip&quot;:&quot;192.0.2.1&quot;,&quot;as name&quot;:&quot;TATACOMM-AS TATA Communications formerly VSNL is Leading ISP, IN&quot;,&quot;allocated&quot;:&quot;2006-08-14&quot;},&quot;192.0.2.1&quot;:{&quot;cc&quot;:&quot;US&quot;,&quot;registry&quot;:&quot;arin&quot;,&quot;as&quot;:&quot;23033&quot;,&quot;bgp prefix&quot;:&quot;192.0.2.1/19&quot;,&quot;ip&quot;:&quot;192.0.2.1&quot;,&quot;as name&quot;:&quot;WOW, US&quot;,&quot;allocated&quot;:&quot;1999-09-29&quot;},&quot;192.0.2.1&quot;:{&quot;cc&quot;:&quot;US&quot;,&quot;registry&quot;:&quot;arin&quot;,&quot;as&quot;:&quot;6453&quot;,&quot;bgp prefix&quot;:&quot;192.0.2.1/17&quot;,&quot;ip&quot;:&quot;192.0.2.1&quot;,&quot;as name&quot;:&quot;AS6453, US&quot;,&quot;allocated&quot;:&quot;2001-05-23&quot;}}",
+            "latency": "0.0",
+            "availability": "0",
+            "down": true,
+            "mtu": "0",
+            "packet_loss": "-1.0",
+            "jitter": "0.0",
+            "asnumber_count": "5",
+            "hop_count": "0",
+            "location_ip": "192.0.2.1",
+            "locid": 8,
+            "as_numbers": "as27323,as5740/as23033,as174,as6453,as4755,",
+            "status": "0"
+        },
+        "tracerouteInfo": {
+            "locationDetails": {
+                "Seattle": "8"
+            },
+            "mplsLinkCount": 0
+        }
+    }
+}

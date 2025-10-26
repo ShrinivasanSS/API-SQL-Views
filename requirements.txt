@@ -1,0 +1,4 @@
+Flask>=3.0
+pandas>=2.1
+python-dotenv>=1.0
+jq>=1.6.0
