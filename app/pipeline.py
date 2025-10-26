@@ -30,7 +30,12 @@ def execute_rule(
 ) -> pd.DataFrame:
     """Execute a transformation rule and return the resulting DataFrame."""
 
-    env: Dict[str, Any] = {"pd": pd, "df_input": df_input, "INPUT_PARAMS": rule.input_params}
+    env: Dict[str, Any] = {
+        "pd": pd,
+        "df_input": df_input,
+        "INPUT_PARAMS": rule.input_params,
+        "__builtins__": __builtins__,
+    }
     if extra_globals:
         env.update(extra_globals)
 
@@ -39,7 +44,7 @@ def execute_rule(
         if rule_override is not None
         else rule.rule_path.read_text(encoding="utf-8")
     )
-    exec(rule_source, {}, env)
+    exec(rule_source, env)
 
     if "df_output" not in env:
         raise RuntimeError(f"Rule {rule.rule_path.name} did not define df_output")
