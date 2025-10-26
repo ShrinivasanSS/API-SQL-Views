@@ -33,7 +33,7 @@ metrics:
     api: /app/api/isp/tabulardetails/{monitor_id}
     sample_input: sample_inputs/metrics/api_isp_tabular_details_15698000397185121.json
     transform_rules:
-      - sample_transformation_rules/isp_tabulardata_metric_transformation.rules
+      - sample_transformation_rules/ISP/isp_tabulardata_metric_transformation.rules
     inputs:
       metric_units:
         packet_loss: "%"
@@ -50,16 +50,16 @@ traces:
     api: /api/isp/traceroute/{monitor_id}
     sample_input: sample_inputs/traces/api_isp_traceroute_15698000397185121.json
     transform_rules:
-      - sample_transformation_rules/isp_trace_transformation.rules
+      - sample_transformation_rules/ISP/isp_trace_transformation.rules
     load:
       table: traces
 
 logs:
   - type: availability_log
     api: /api/reports/log_reports/{monitor_id}?date={today}
-    sample_input: sample_inputs/logs/api_15698000397185121_logreport.json
+    sample_input: sample_inputs/logs/api_isp_15698000397185121_logreport.json
     transform_rules:
-      - sample_transformation_rules/isp_logreport_transformation.rules
+      - sample_transformation_rules/ISP/isp_logreport_transformation.rules
     load:
       table: logs
 
@@ -70,7 +70,7 @@ events:
     api:
       path: /api/applog/search/{start_date}%20{start_time}/{end_date}%20{end_time}/{range}/desc?
       query_param: q
-    sample_input: sample_inputs/events/api_infrastructure_events_isp.json
+    sample_input: sample_inputs/events/api_isp_infrastructure_events.json
     pagination:
       page_size: 100
       start_index: 1

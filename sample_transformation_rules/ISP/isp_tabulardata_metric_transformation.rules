@@ -8,7 +8,7 @@ raw_map_data = df_input["data"].iloc[0]["tabularData"]["map_data"]["data"][0]
 # Each metric becomes a separate row
 rows = []
 for metric_name, value in raw_map_data.items():
-    if metric_name == "location_id":
+    if metric_name == "location_id" or metric_name == "location_name":
         # skip – used as EntityInstance below
         continue
     rows.append({

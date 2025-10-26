@@ -60,7 +60,7 @@ metrics:
   - type: isp_tabular
     api: /app/api/isp/tabulardetails/{monitor_id}
     sample_input: sample_inputs/metrics/api_isp_tabular_details_15698000397185121.json
-    transform_rules: [sample_transformation_rules/isp_tabulardata_metric_transformation.rules]
+    transform_rules: [sample_transformation_rules/ISP/isp_tabulardata_metric_transformation.rules]
     inputs:
       metric_units:
         packet_loss: "%"
@@ -76,15 +76,15 @@ traces:
   - type: traceroute
     api: /api/isp/traceroute/{monitor_id}
     sample_input: sample_inputs/traces/api_isp_traceroute_15698000397185121.json
-    transform_rules: [sample_transformation_rules/isp_trace_transformation.rules]
+    transform_rules: [sample_transformation_rules/ISP/isp_trace_transformation.rules]
     load:
       table: Traces
 
 logs:
   - type: availability_log
     api: /api/reports/log_reports/{monitor_id}?date={today}
-    sample_input: sample_inputs/logs/api_15698000397185121_logreport.json
-    transform_rules: [sample_transformation_rules/isp_logreport_transformation.rules]
+    sample_input: sample_inputs/logs/api_isp_15698000397185121_logreport.json
+    transform_rules: [sample_transformation_rules/ISP/isp_logreport_transformation.rules]
     load:
       table: Logs
 
@@ -102,7 +102,7 @@ events:
       # range format: "{start_index}-{end_index}" e.g., "1-100"
       # Provider-specific query parameter name for the filter:
       query_param: q
-    sample_input: sample_inputs/events/api_infrastructure_events_isp.json
+    sample_input: sample_inputs/events/api_isp_infrastructure_events.json
     pagination:
       page_size: 100                # chunk size for range window
       start_index: 1                # first index (inclusive)
