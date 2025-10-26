@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Observability ETL Workbench</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}" />
+  </head>
+  <body>
+    <div id="app-container">
+      <aside id="nav-pane">
+        <h1>Observability</h1>
+        <nav>
+          <button data-view="credentials" class="nav-item active">Credentials</button>
+          <button data-view="apis" class="nav-item">APIs</button>
+          <button data-view="rules" class="nav-item">Transformation Rules</button>
+          <button data-view="tables" class="nav-item">Tables</button>
+          <button data-view="views" class="nav-item">Views</button>
+          <button data-view="workflows" class="nav-item">Workflows</button>
+          <button data-view="automations" class="nav-item">Automations</button>
+        </nav>
+        <div class="nav-footer">
+          <button id="run-pipeline" class="primary">Run ETL Pipeline</button>
+          <div id="pipeline-status" class="muted"></div>
+        </div>
+      </aside>
+      <main id="main-pane">
+        <header>
+          <h2 id="view-title">Credentials</h2>
+          <p id="view-description">OAuth credentials loaded from the demo environment.</p>
+        </header>
+        <section id="content-pane" class="scrollable"></section>
+      </main>
+      <aside id="detail-pane">
+        <header>
+          <h3 id="detail-title">Inspector</h3>
+        </header>
+        <section id="detail-controls" class="scrollable"></section>
+      </aside>
+    </div>
+    <script src="{{ url_for('static', filename='js/main.js') }}" defer></script>
+  </body>
+</html>
