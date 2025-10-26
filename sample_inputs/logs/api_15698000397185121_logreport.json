@@ -1,0 +1,46 @@
+{
+    "code": 0,
+    "message": "success",
+    "data": {
+        "headers": {
+            "collection_time": "Collection Time",
+            "location_id": "Location",
+            "availability": "Status",
+            "latency": "Latency (ms)",
+            "jitter": "Jitter (ms)",
+            "packet_loss": "Packet Loss (%)",
+            "reason": "Reason"
+        },
+        "report": [
+            {
+                "ct": "1760934832019",
+                "packet_loss": "-",
+                "reason": "Traceroute did not complete successfully",
+                "locIp": "107.155.105.2",
+                "data_collection_type": "1",
+                "jitter": "0",
+                "latency": "0",
+                "collection_time": "2025-10-19T21:33:52-0700",
+                "availability": "0",
+                "location_id": "8"
+            },
+            {
+                "ct": "1760934832019",
+                "packet_loss": "-",
+                "reason": "Traceroute did not complete successfully",
+                "locIp": "107.155.105.2",
+                "data_collection_type": "1",
+                "jitter": "0",
+                "latency": "0",
+                "collection_time": "2025-10-19T21:33:52-0700",
+                "availability": "0",
+                "location_id": "8"
+            }
+        ],
+        "static_col": [
+            "collection_time",
+            "availability",
+            "location_id"
+        ]
+    }
+}

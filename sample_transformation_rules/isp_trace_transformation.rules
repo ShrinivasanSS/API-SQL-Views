@@ -1,0 +1,53 @@
+# ------------------------------------------------------------------
+# 1️⃣ Load the nested JSON from df_input
+json_data = df_input.iloc[0].to_dict()
+
+# 2️⃣ Prepare common values from INPUT_PARAMS
+entity_type = INPUT_PARAMS["entity_type"]
+entity_id   = INPUT_PARAMS["entity_id"]
+
+# ------------------------------------------------------------------
+# 3️⃣ Find all location keys that have a trace output string.
+#    The trace output is stored under:
+#      data[<location>]["trace_output"]   (or  data[<location>].get("trace_output")
+#      OR   tracerouteInfo.locationDetails[<location>]
+#
+locations = []
+
+# Try the first pattern: data[loc]["trace_output"]
+for loc, val in json_data["data"].items():
+    if isinstance(val, dict) and "trace_output" in val:
+        locations.append(loc)
+
+# If nothing found, fall back to tracerouteInfo.locationDetails
+if not locations:
+    for loc in json_data.get("tracerouteInfo", {}).get("locationDetails", {}):
+        locations.append(loc)
+
+# ------------------------------------------------------------------
+# 4️⃣ Build the rows list
+rows = []
+for loc in locations:
+    # trace output string (plain text)
+    trace_output_str = (
+        json_data["data"][loc]["trace_output"] if "trace_output" in json_data["data"][loc]
+        else json_data["tracerouteInfo"]["locationDetails"][loc]
+    )
+
+    # instance id for this location
+    trace_instance = json_data["data"][loc].get("locid", None)
+
+    rows.append({
+        "TraceType":        "traceroute",
+        "TraceEntityType":  entity_type,
+        "TraceEntityID":    entity_id,
+        "TraceTime":        None,          # optional – not in the sample
+        "TraceInstance":   trace_instance,
+        "TraceData":       trace_output_str
+    })
+
+# ------------------------------------------------------------------
+# 5️⃣ Convert to DataFrame and optionally to CSV
+df_output = pd.DataFrame(rows)
+
+# df_output.to_csv("trace_output.csv", index=False)

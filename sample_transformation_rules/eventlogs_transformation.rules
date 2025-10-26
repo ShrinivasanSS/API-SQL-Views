@@ -1,0 +1,88 @@
+# ------------------------------------------------------------------
+# 1️⃣ Load the nested JSON from df_input (one row)
+json_data = df_input.iloc[0].to_dict()
+
+# ------------------------------------------------------------------
+# 2️⃣ Build a list of rows – one for each document in `docs`
+rows = []
+
+for doc in json_data["data"]["docs"]:
+    # ---- EventTime
+    event_time = doc.get("_zlf__zl_received_time")   # e.g. "25-10-2025 15:54:20:393"
+
+    # ---- Source Name (sourcename)
+    entity_name = doc.get("sourcename")
+
+    # ---- Product Module (productmodule)
+    product_module = doc.get("productmodule")
+
+    # ---- Host (globalservicename)
+    host = doc.get("globalservicename")
+
+    # ---- Event Type (eventtype)
+    event_type = doc.get("eventtype")
+
+    # ---- Source (source)
+    entity_type = doc.get("source")
+
+    # ---- Source Type (sourcetype)
+    source_type = doc.get("sourcetype")
+
+    # ---- Severity (severity)
+    severity = doc.get("severity")
+
+    # ---- Tags – concatenate key:value pairs from configdata
+    tags_list = [
+        f"{conf['key']}:{conf['value']}"
+        for conf in doc.get("configdata", [])
+    ]
+    tags = ",".join(tags_list)
+
+    # ---- Monitor Groups (monitorgroup)
+    monitor_groups = doc.get("monitorgroup")
+
+    # ---- IP Address – use locIp if present, otherwise the first dnsServer
+    ip_address = doc.get("locIp")
+    if not ip_address:
+        # find dnsServer in configdata
+        for conf in doc.get("configdata", []):
+            if conf["key"] == "dnsServer":
+                ip_address = conf["value"]
+                break
+
+    # ---- Message (message)
+    message = doc.get("message")
+
+    rows.append({
+        "EventTime":       event_time,
+        "Entity Name":     entity_name,
+        "Product Module":  product_module,
+        "Host":            host,
+        "Event Type":      event_type,
+        "Entity Type":     entity_type,
+        "Source Type":     source_type,
+        "Severity":        severity,
+        "Tags":            tags,
+        "Monitor Groups":  monitor_groups,
+        "IP Address":      ip_address,
+        "Message":         message
+    })
+
+# ------------------------------------------------------------------
+# 3️⃣ Create the final DataFrame with the requested column order
+column_order = [
+    "EventTime",
+    "Entity Name",
+    "Product Module",
+    "Host",
+    "Event Type",
+    "Entity Type",
+    "Source Type",
+    "Severity",
+    "Tags",
+    "Monitor Groups",
+    "IP Address",
+    "Message"
+]
+
+df_output = pd.DataFrame(rows, columns=column_order)

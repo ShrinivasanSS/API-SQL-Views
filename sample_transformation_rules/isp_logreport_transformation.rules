@@ -1,0 +1,30 @@
+# ------------------------------------------------------------------
+# 1️⃣ Load the nested JSON from df_input
+json_data = df_input.iloc[0].to_dict()
+
+# ------------------------------------------------------------------
+# 2️⃣ Pull common values from INPUT_PARAMS
+entity_type = INPUT_PARAMS["entity_type"]
+entity_id   = INPUT_PARAMS["entity_id"]
+
+# ------------------------------------------------------------------
+# 3️⃣ Extract the report list and build rows
+rows = []
+for rec in json_data["data"]["report"]:
+    # All fields are already strings except 'ct' which is a timestamp (int)
+    rows.append({
+        "LogType":          "LogReport",
+        "LogEntityType":   entity_type,
+        "LogEntityID":     entity_id,
+        "collection_time": rec.get("collection_time"),
+        "location_id":     rec.get("location_id"),
+        "availability":    rec.get("availability"),
+        "latency":         rec.get("latency"),
+        "jitter":          rec.get("jitter"),
+        "packet_loss":     rec.get("packet_loss"),
+        "reason":          rec.get("reason")
+    })
+
+# ------------------------------------------------------------------
+# 4️⃣ Assemble into DataFrame
+df_output = pd.DataFrame(rows)

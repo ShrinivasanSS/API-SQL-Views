@@ -1,0 +1,295 @@
+{
+    "code": 0,
+    "message": "success",
+    "data": {
+        "readTimeTaken": "216",
+        "isAggregation": false,
+        "searchTimeTaken": "403",
+        "timezone": "America/Los_Angeles",
+        "isCount": false,
+        "result": {},
+        "_zlf_numFound": "Total messages matched: 4",
+        "docs": [
+            {
+                "monitorid": "15698000388012031",
+                "eventorigin": "Site24x7",
+                "source": "ISP",
+                "layer": "END_USER",
+                "_zl_source": "10",
+                "monitorgroup": "winzogames.com_FQDN_SmartGroup",
+                "sourcetype": "ISP Latency",
+                "productmodule": "ISP",
+                "_zlf__zl_logtype": "s247oneindex",
+                "severity": "Up",
+                "globalservicename": "winzogames.com",
+                "_zl_timestamp": "1761432853016",
+                "s247agentuid": "648ab9f62f3f360859f65eb43d256906",
+                "sourcename": "Test",
+                "technology": "Internet Services like DNS, SMTP, etc.",
+                "message": "Status Cleared - New York - US",
+                "_zl_size": "867",
+                "_zlf_monitorid": "15698000388012031",
+                "_zlf__zl_received_time": "25-10-2025 15:54:20:393",
+                "_zlf_s247mongroupids": "[15698000431630416]",
+                "_zl_received_time": "1761432860393",
+                "_zl_unique_id": "775d568b-b696-4bb9-9a4d-e9124b2a33a6",
+                "_zlf__zl_timestamp": {
+                    "_requested_time": "15:54:13:016",
+                    "_requested_timezone": "PDT",
+                    "_date": "25-10-2025",
+                    "_type": "time",
+                    "_requested_date": "25-10-2025",
+                    "_timezone": "PDT",
+                    "_time": "15:54:13:016"
+                },
+                "eventtype": "Availability",
+                "s247mongroupids": [
+                    "15698000431630416"
+                ],
+                "configdata": [
+                    {
+                        "value": "1",
+                        "key": "attributeId"
+                    },
+                    {
+                        "value": "2:1:1",
+                        "key": "nd"
+                    },
+                    {
+                        "value": "5",
+                        "key": "pf"
+                    },
+                    {
+                        "value": "3",
+                        "key": "ld"
+                    },
+                    {
+                        "value": "New York - US",
+                        "key": "location"
+                    },
+                    {
+                        "value": "192.0.2.1",
+                        "key": "dnsServer"
+                    },
+                    {
+                        "value": "ISP Events",
+                        "key": "resource_layer"
+                    }
+                ],
+                "_zlf__zl_source": "ZQ_KAFKA"
+            },
+            {
+                "monitorid": "15698000388012031",
+                "eventorigin": "Site24x7",
+                "source": "ISP",
+                "layer": "Connection Failure",
+                "_zl_source": "10",
+                "monitorgroup": "winzogames.com_FQDN_SmartGroup",
+                "sourcetype": "ISP Latency",
+                "productmodule": "ISP",
+                "_zlf__zl_logtype": "s247oneindex",
+                "severity": "Down",
+                "globalservicename": "winzogames.com",
+                "_zl_timestamp": "1761432432002",
+                "s247agentuid": "648ab9f62f3f360859f65eb43d256906",
+                "sourcename": "Test",
+                "technology": "Internet Services like DNS, SMTP, etc.",
+                "message": "Traceroute did not complete successfully - New York - US",
+                "_zl_size": "990",
+                "_zlf_monitorid": "15698000388012031",
+                "_zlf__zl_received_time": "25-10-2025 15:49:12:870",
+                "_zlf_s247mongroupids": "[15698000431630416]",
+                "_zl_received_time": "1761432552870",
+                "_zl_unique_id": "e1e6b14f-70be-4619-bc4b-a5886f3ca75b",
+                "_zlf__zl_timestamp": {
+                    "_requested_time": "15:47:12:002",
+                    "_requested_timezone": "PDT",
+                    "_date": "25-10-2025",
+                    "_type": "time",
+                    "_requested_date": "25-10-2025",
+                    "_timezone": "PDT",
+                    "_time": "15:47:12:002"
+                },
+                "eventtype": "Availability",
+                "s247mongroupids": [
+                    "15698000431630416"
+                ],
+                "configdata": [
+                    {
+                        "value": "1",
+                        "key": "attributeId"
+                    },
+                    {
+                        "value": "2:1:1",
+                        "key": "nd"
+                    },
+                    {
+                        "value": "5",
+                        "key": "pf"
+                    },
+                    {
+                        "value": "3",
+                        "key": "ld"
+                    },
+                    {
+                        "value": "Connection Failure",
+                        "key": "event_layer"
+                    },
+                    {
+                        "value": "5320",
+                        "key": "errorCode"
+                    },
+                    {
+                        "value": "New York - US",
+                        "key": "location"
+                    },
+                    {
+                        "value": "192.0.2.1",
+                        "key": "dnsServer"
+                    },
+                    {
+                        "value": "ISP Events",
+                        "key": "resource_layer"
+                    }
+                ],
+                "_zlf__zl_source": "ZQ_KAFKA"
+            },
+            {
+                "monitorid": "15698000390122118",
+                "eventorigin": "Site24x7",
+                "source": "ISP",
+                "layer": "END_USER",
+                "_zl_source": "10",
+                "monitorgroup": "salesforce.com_FQDN_SmartGroup",
+                "sourcetype": "ISP Latency",
+                "productmodule": "ISP",
+                "_zlf__zl_logtype": "s247oneindex",
+                "severity": "Up",
+                "globalservicename": "salesforce.com",
+                "_zl_timestamp": "1761394638019",
+                "s247agentuid": "63f4b0b6148737699e2e79bc5f37e6aa",
+                "sourcename": "ISP latency Jishnu test",
+                "technology": "Internet Services like DNS, SMTP, etc.",
+                "message": "Status Cleared - Chennai - IN",
+                "_zl_size": "807",
+                "_zlf_monitorid": "15698000390122118",
+                "_zlf__zl_received_time": "25-10-2025 05:17:37:099",
+                "_zlf_s247mongroupids": "[15698000431630384]",
+                "_zl_received_time": "1761394657099",
+                "_zl_unique_id": "b0aeafb0-3a2d-41d1-9add-81ee9e4d4b5c",
+                "_zlf__zl_timestamp": {
+                    "_requested_time": "05:17:18:019",
+                    "_requested_timezone": "PDT",
+                    "_date": "25-10-2025",
+                    "_type": "time",
+                    "_requested_date": "25-10-2025",
+                    "_timezone": "PDT",
+                    "_time": "05:17:18:019"
+                },
+                "eventtype": "Availability",
+                "s247mongroupids": [
+                    "15698000431630384"
+                ],
+                "configdata": [
+                    {
+                        "value": "1",
+                        "key": "attributeId"
+                    },
+                    {
+                        "value": "Chennai - IN",
+                        "key": "location"
+                    },
+                    {
+                        "value": "192.0.2.1",
+                        "key": "dnsServer"
+                    },
+                    {
+                        "value": "ISP Events",
+                        "key": "resource_layer"
+                    }
+                ],
+                "_zlf__zl_source": "ZQ_KAFKA"
+            },
+            {
+                "monitorid": "15698000390122118",
+                "eventorigin": "Site24x7",
+                "source": "ISP",
+                "layer": "Connection Failure",
+                "_zl_source": "10",
+                "monitorgroup": "salesforce.com_FQDN_SmartGroup",
+                "sourcetype": "ISP Latency",
+                "productmodule": "ISP",
+                "_zlf__zl_logtype": "s247oneindex",
+                "severity": "Down",
+                "globalservicename": "salesforce.com",
+                "_zl_timestamp": "1761394304037",
+                "s247agentuid": "63f4b0b6148737699e2e79bc5f37e6aa",
+                "sourcename": "ISP latency Jishnu test",
+                "technology": "Internet Services like DNS, SMTP, etc.",
+                "message": "Traceroute did not complete successfully - Chennai - IN",
+                "_zl_size": "931",
+                "_zlf_monitorid": "15698000390122118",
+                "_zlf__zl_received_time": "25-10-2025 05:12:17:623",
+                "_zlf_s247mongroupids": "[15698000431630384]",
+                "_zl_received_time": "1761394337623",
+                "_zl_unique_id": "4d325014-a8bf-4b3e-9a1d-71363bec7829",
+                "_zlf__zl_timestamp": {
+                    "_requested_time": "05:11:44:037",
+                    "_requested_timezone": "PDT",
+                    "_date": "25-10-2025",
+                    "_type": "time",
+                    "_requested_date": "25-10-2025",
+                    "_timezone": "PDT",
+                    "_time": "05:11:44:037"
+                },
+                "eventtype": "Availability",
+                "s247mongroupids": [
+                    "15698000431630384"
+                ],
+                "configdata": [
+                    {
+                        "value": "1",
+                        "key": "attributeId"
+                    },
+                    {
+                        "value": "Connection Failure",
+                        "key": "event_layer"
+                    },
+                    {
+                        "value": "5320",
+                        "key": "errorCode"
+                    },
+                    {
+                        "value": "Chennai - IN",
+                        "key": "location"
+                    },
+                    {
+                        "value": "192.0.2.1",
+                        "key": "dnsServer"
+                    },
+                    {
+                        "value": "ISP Events",
+                        "key": "resource_layer"
+                    }
+                ],
+                "_zlf__zl_source": "ZQ_KAFKA"
+            }
+        ],
+        "actualQuery": "logtype=\"s247oneindex\" and source=\"ISP\"",
+        "numFound": "4",
+        "_numFound": "4",
+        "logtypesQueried": [
+            "s247oneindex"
+        ],
+        "ResponseTime": "639 msec",
+        "ErrorCode": "0",
+        "searchVersion": "2",
+        "retrievedDocsByLogTypes": [
+            {
+                "logtype": "s247oneindex",
+                "count": "4",
+                "_zlf_count": "4"
+            }
+        ]
+    }
+}

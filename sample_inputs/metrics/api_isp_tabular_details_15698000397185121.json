@@ -1,0 +1,24 @@
+{
+    "code": 0,
+    "message": "success",
+    "data": {
+        "tabularData": {
+            "map_data": {
+                "data": [
+                    {
+                        "packet_loss": -1.0,
+                        "location_name": "Seattle - US",
+                        "asnumber_count": 5.0,
+                        "jitter": 0.0,
+                        "hop_count": 0.0,
+                        "latency": 0.0,
+                        "collection_time": "2025-10-19T21:28:21-0700",
+                        "down": "true",
+                        "location_id": "8",
+                        "mtu": 0.0
+                    }
+                ]
+            }
+        }
+    }
+}

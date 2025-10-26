@@ -1,0 +1,14 @@
+# How to find this in Entities table?
+ENTITY_TYPE="ISP"
+# How to populate the Entities table with this entity type?
+ENTITY_LIST_API="https://www.example.com/app/api/current_status/type/ISP"
+# Unique identifier from the entity list that maps to entity_id field. 
+ENTITY_ID=".data.monitors[].monitor_id"
+# List of APIs that give the entity Metrics. 
+ENTITY_METRICS_API=["https://www.example.com/app/api/isp/tabulardetails/{entity_id}"]
+# List of APIs that can fetch the entity traces. 
+ENTITY_TRACES_API=["https://www.example.com/app/api/isp/traceroute/{entity_id}"]
+# List of APIs that give logs associated with the entity. 
+ENTITY_LOGS_API=["https://www.site24x7.com/app/api/reports/log_reports/{entity_id}?date={today}"]
+# Event Log query to fetch the entity's events. 
+ENTITY_EVENTS_QUERY_API=["logtype=\"Infrastructure Events\" and source=\"ISP\""]

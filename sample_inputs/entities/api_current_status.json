@@ -1,0 +1,39 @@
+{
+    "code": 0,
+    "message": "success",
+    "data": {
+        "monitors": [
+            {
+                "monitor_id": "15698000425175977",
+                "name": "VeeamTest",
+                "monitor_type": "AZURE-VM",
+                "tags": [
+                    "location:australiacentral",
+                    "subscription:Pay-As-You-Go-Site24x7-cost",
+                    "serviceType:AZURE-VM",
+                    "Don't Delete:Cleanup",
+                    "resourceGroup:site24x7"
+                ],
+                "status": 0
+            },
+            {
+                "monitor_id": "15698000397185121",
+                "name": "ISP Latency - UK",
+                "monitor_type": "ISP",
+                "status": 0
+            },
+            {
+                "monitor_id": "15698000431694007",
+                "name": "test",
+                "monitor_type": "URL",
+                "status": 1
+            },
+            {
+                "monitor_id": "15698000406359035",
+                "name": "vidhya1",
+                "monitor_type": "URL",
+                "status": 0
+            }
+        ]
+    }
+}

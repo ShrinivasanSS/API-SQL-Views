@@ -1,0 +1,2 @@
+TraceType,TraceEntityType,TraceEntityID,TraceTime,TraceInstance,TraceData
+traceroute,ISP,15698000397185121,-,"Seattle","<Seattle's trace-output string>"

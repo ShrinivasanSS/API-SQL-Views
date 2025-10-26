@@ -1,0 +1,5 @@
+EntityType,EntityID,EntityName,EntityCurrentStatus,EntityTags
+AZURE-VM,15698000425175977,VeeamTest,0,"location:australiacentral,subscription:Pay-As-You-Go-Site24x7-cost,serviceType:AZURE-VM,Dont Delete:Cleanup,resourceGroup:site24x7"
+ISP,15698000397185121,ISP Latency - UK,0,
+URL,15698000431694007,test,1,
+URL,15698000406359035,vidhya1,0,

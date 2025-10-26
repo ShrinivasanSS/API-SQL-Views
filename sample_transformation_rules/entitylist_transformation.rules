@@ -1,0 +1,19 @@
+# -------------------------------------------------------------
+# 1️⃣ Extract the list of monitors from the nested JSON field
+monitors = df_input["data"].iloc[0]["monitors"]   # gives a Python list of dicts
+
+# -------------------------------------------------------------
+# 2️⃣ Convert that list into a pandas DataFrame with the required columns
+df_output = pd.DataFrame(
+    {
+        "EntityType":          [m.get("monitor_type", "") for m in monitors],
+        "EntityID":           [m.get("monitor_id", "") for m in monitors],
+        "EntityName":         [m.get("name", "") for m in monitors],
+        "EntityCurrentStatus": [m.get("status", "") for m in monitors],
+        # Join tags; if no tags, keep an empty string
+        "EntityTags":          [
+            ",".join(m.get("tags", [])) if isinstance(m.get("tags", None), list) else ""
+            for m in monitors
+        ]
+    }
+)

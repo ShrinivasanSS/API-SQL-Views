@@ -1,0 +1,7 @@
+EntityType,EntityID,EntityInstance,MetricName,CurrentValue,MetricUnit
+ISP,15698000397185121,8,packet_loss,-1.0,%
+ISP,15698000397185121,8,latency,0.0,ms
+ISP,15698000397185121,8,mtu,0.0,bytes
+ISP,15698000397185121,8,jitter,0.0,ms
+ISP,15698000397185121,8,asnumber_count,5.0,count
+ISP,15698000397185121,8,hop_count,0.0,count

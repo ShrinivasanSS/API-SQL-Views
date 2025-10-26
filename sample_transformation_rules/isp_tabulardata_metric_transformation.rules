@@ -1,0 +1,23 @@
+# From INPUT_PARAMS (already defined)
+entity_type = INPUT_PARAMS["entity_type"]
+entity_id   = INPUT_PARAMS["entity_id"]
+metric_units = INPUT_PARAMS["metric_units"]
+# From df_input – one row with nested JSON
+raw_map_data = df_input["data"].iloc[0]["tabularData"]["map_data"]["data"][0]
+
+# Each metric becomes a separate row
+rows = []
+for metric_name, value in raw_map_data.items():
+    if metric_name == "location_id":
+        # skip – used as EntityInstance below
+        continue
+    rows.append({
+        "EntityType":      entity_type,
+        "EntityID":        entity_id,
+        "EntityInstance":  raw_map_data["location_id"],
+        "MetricName":     metric_name,
+        "CurrentValue":   value,
+        "MetricUnit":     metric_units.get(metric_name, "")
+    })
+
+df_output = pd.DataFrame(rows)
