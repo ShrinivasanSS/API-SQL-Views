@@ -23,6 +23,17 @@ and querying the resulting tables.
 - **Rule authoring support** with live previews and the ability to persist
   custom rules in the local storage directory.
 
+## Phase II additions
+
+- **Blueprint-driven orchestration** converts YAML definitions into runnable
+  extraction/transformation/load jobs per entity type so that new pipelines can
+  be onboarded without touching Python code.
+- **Events pillar uplift** introduces a normalised schema (`EntityType`,
+  `EntityID`, `EventType`, `EventTime`, etc.) and blueprint-defined upsert keys
+  to keep pagination idempotent.
+- **Registry-backed discovery** exposes available blueprints (including their
+  source rules and sample payloads) to the UI for previewing and debugging.
+
 ## Project structure
 
 ```
@@ -42,7 +53,9 @@ storage/                 # Generated SQLite database and custom rules
 The pipeline configuration lives in `app/config.py`. Each `PipelineRule` entry
 references a JSON payload and a transformation rule. Adding new entity types is
 as easy as dropping a new payload and rule file in the relevant folders and
-extending the configuration tuple.
+extending the configuration tuple. Blueprint metadata is stored under
+`blueprints/` with a `blueprints.csv` registry and one YAML file per entity
+type.
 
 ## Getting started
 

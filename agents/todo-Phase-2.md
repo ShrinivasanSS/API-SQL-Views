@@ -11,6 +11,8 @@ Make the ETL fully **blueprint-driven**. For each `EntityType`, a YAML blueprint
 
 This phase adds **Events** as a first-class pillar. Unlike other pillars, all Events come from one shared API; only the **query** (filters + time range) varies by entity.
 
+> **Implementation note:** For the offline prototype we attach `sample_input` hints to each blueprint source. These point to cached JSON payloads under `sample_inputs/` and keep the ETL runnable without live API access. Future phases can drop the hint in favour of real extractors.
+
 ---
 
 ## What’s New in Phase II
@@ -34,8 +36,6 @@ This phase adds **Events** as a first-class pillar. Unlike other pillars, all Ev
 ```csv
 EntityType,BlueprintFile
 ISP,isp_blueprint.yaml
-URL,url_blueprint.yaml
-AZURE-VM,azure_vm_blueprint.yaml
 ```
 
 ### 2) Blueprint Schema (superset)
@@ -45,42 +45,48 @@ version: 1
 
 entity:
   entityType: ISP
-  entityIdField: monitor_id
+  entityIdField: EntityID
 
 defaults:
   method: GET
   # Upsert/merge keys per pillar; can be overridden at source level
   upsert:
-    metrics:   [EntityType, EntityID, MetricType, MetricName, TimeBucket]
-    traces:    [EntityType, EntityID, TraceType, TraceInstance, TraceTime]
-    logs:      [EntityType, EntityID, LogType, Time, LogInstance]
+    metrics:   [EntityType, EntityID, EntityInstance, MetricName]
+    traces:    [TraceEntityType, TraceEntityID, TraceType, TraceInstance]
+    logs:      [LogEntityType, LogEntityID, LogType, collection_time]
     events:    [EntityType, EntityID, EventType, EventTime, EventId]  # EventId optional if provider lacks it
 
 metrics:
   - type: isp_tabular
     api: /app/api/isp/tabulardetails/{monitor_id}
-    transform_rules: [isp_tabular_metric_transformation.rules]
+    sample_input: sample_inputs/metrics/api_isp_tabular_details_15698000397185121.json
+    transform_rules: [sample_transformation_rules/isp_tabulardata_metric_transformation.rules]
+    inputs:
+      metric_units:
+        packet_loss: "%"
+        latency: "ms"
+        mtu: "bytes"
+        jitter: "ms"
+        asnumber_count: "count"
+        hop_count: "count"
     load:
       table: Metrics
 
 traces:
   - type: traceroute
     api: /api/isp/traceroute/{monitor_id}
-    transform_rules: [isp_trace_transformation.rules]
-    load:
-      table: Traces
-  - type: mtr
-    api: /api/isp/traceroute/{monitor_id}
-    transform_rules: [isp_mtr_transformation.rules]
+    sample_input: sample_inputs/traces/api_isp_traceroute_15698000397185121.json
+    transform_rules: [sample_transformation_rules/isp_trace_transformation.rules]
     load:
       table: Traces
 
 logs:
   - type: availability_log
     api: /api/reports/log_reports/{monitor_id}?date={today}
-    transform_rules: [isp_logreport_transformation.rules]
+    sample_input: sample_inputs/logs/api_15698000397185121_logreport.json
+    transform_rules: [sample_transformation_rules/isp_logreport_transformation.rules]
     load:
-      table: Logs_availability
+      table: Logs
 
 # ─────────────────────────────
 # NEW: Events pillar blueprint
@@ -96,6 +102,7 @@ events:
       # range format: "{start_index}-{end_index}" e.g., "1-100"
       # Provider-specific query parameter name for the filter:
       query_param: q
+    sample_input: sample_inputs/events/api_infrastructure_events_isp.json
     pagination:
       page_size: 100                # chunk size for range window
       start_index: 1                # first index (inclusive)
@@ -103,13 +110,18 @@ events:
     schedule:
       lookback: "24h"               # default rolling window when not specified by workflow
       align_to: "now"               # or "hour", "day"
-    transform_rules: [eventlogs_transformation.rules]
+    transform_rules: [sample_transformation_rules/eventlogs_transformation.rules]
+    inputs:
+      event_type: Infrastructure
     load:
       table: Events
       # Optional override for upsert keys if provider supplies an id
       upsert_keys: [EntityType, EntityID, EventType, EventId]
       # Map common event fields (the rule should output these columns)
       expected_columns:
+        - EntityType
+        - EntityID
+        - EntityName
         - EventId
         - EventTime
         - EventType
@@ -171,6 +183,7 @@ Each rule should output a **DataFrame** with the preset table’s columns. For `
 | ---------- | ------------------------------------------------------------------------------------- |
 | EntityType | E.g., `ISP` (inject from blueprint/entity during transform or load)                   |
 | EntityID   | The current entity’s id                                                               |
+| EntityName | Optional helper sourced from the entities table                                       |
 | EventType  | E.g., `Infrastructure` (from blueprint source `type`)                                 |
 | EventTime  | Parsed timestamp (UTC recommended)                                                    |
 | Severity   | Normalized string or numeric level                                                    |

@@ -33,6 +33,10 @@ def _rule_by_name(name: str) -> PipelineRule | None:
                 table_type=metadata["table_type"],
                 description=metadata["description"],
                 input_params=metadata.get("input_params", {}),
+                load_mode=metadata.get("load_mode", "replace"),
+                upsert_keys=tuple(metadata["upsert_keys"])
+                if metadata.get("upsert_keys")
+                else None,
             )
     return None
 
