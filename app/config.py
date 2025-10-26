@@ -9,6 +9,8 @@ from typing import Any, Dict
 from dotenv import load_dotenv
 import os
 
+from .blueprints import BlueprintRegistry
+
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -33,6 +35,8 @@ class PipelineRule:
     table_type: str
     description: str
     input_params: Dict[str, Any] = field(default_factory=dict)
+    load_mode: str = "replace"
+    upsert_keys: tuple[str, ...] | None = None
 
     def to_metadata(self) -> Dict[str, Any]:
         return {
@@ -44,6 +48,8 @@ class PipelineRule:
             "table_type": self.table_type,
             "description": self.description,
             "input_params": self.input_params,
+            "load_mode": self.load_mode,
+            "upsert_keys": list(self.upsert_keys) if self.upsert_keys else None,
         }
 
 
@@ -55,6 +61,7 @@ class AppConfig:
     storage_dir: Path
     pipeline_rules: tuple[PipelineRule, ...]
     credentials: Dict[str, str]
+    blueprint_registry: BlueprintRegistry
 
     @classmethod
     def load_from_env(cls) -> "AppConfig":
@@ -73,19 +80,27 @@ class AppConfig:
         }
 
         rules = cls._load_default_rules()
+        blueprints = BlueprintRegistry.from_csv(
+            PROJECT_ROOT / "blueprints" / "blueprints.csv",
+            project_root=PROJECT_ROOT,
+        )
 
         return cls(
             database_path=database_path,
             storage_dir=storage,
             pipeline_rules=rules,
             credentials=credentials,
+            blueprint_registry=blueprints,
         )
 
     def as_flask_config(self) -> Dict[str, Any]:
+        base_rules = [rule.to_metadata() for rule in self.pipeline_rules]
+        blueprint_rules = self.blueprint_registry.list_source_rules()
         return {
             "DATABASE_PATH": str(self.database_path),
-            "PIPELINE_RULES": [rule.to_metadata() for rule in self.pipeline_rules],
+            "PIPELINE_RULES": [*base_rules, *blueprint_rules],
             "CREDENTIALS": self.credentials,
+            "BLUEPRINTS": self.blueprint_registry.describe(),
         }
 
     @staticmethod
@@ -106,82 +121,6 @@ class AppConfig:
                 table_name="entities",
                 table_type="preset",
                 description="Current inventory of monitors extracted from the API",
-            ),
-            PipelineRule(
-                name="metrics",
-                title="Metrics",
-                input_path=PROJECT_ROOT
-                / "sample_inputs"
-                / "metrics"
-                / "api_isp_tabular_details_15698000397185121.json",
-                rule_path=PROJECT_ROOT
-                / "sample_transformation_rules"
-                / "isp_tabulardata_metric_transformation.rules",
-                table_name="metrics",
-                table_type="preset",
-                description="ISP metric samples rendered into a tall table",
-                input_params={
-                    "entity_type": "ISP",
-                    "entity_id": "15698000397185121",
-                    "metric_units": {
-                        "packet_loss": "%",
-                        "latency": "ms",
-                        "mtu": "bytes",
-                        "jitter": "ms",
-                        "asnumber_count": "count",
-                        "hop_count": "count",
-                    },
-                },
-            ),
-            PipelineRule(
-                name="logs",
-                title="Logs",
-                input_path=PROJECT_ROOT
-                / "sample_inputs"
-                / "logs"
-                / "api_15698000397185121_logreport.json",
-                rule_path=PROJECT_ROOT
-                / "sample_transformation_rules"
-                / "isp_logreport_transformation.rules",
-                table_name="logs",
-                table_type="preset",
-                description="Log report data for a given ISP monitor",
-                input_params={
-                    "entity_type": "ISP",
-                    "entity_id": "15698000397185121",
-                },
-            ),
-            PipelineRule(
-                name="events",
-                title="Events",
-                input_path=PROJECT_ROOT
-                / "sample_inputs"
-                / "events"
-                / "api_infrastructure_events_isp.json",
-                rule_path=PROJECT_ROOT
-                / "sample_transformation_rules"
-                / "eventlogs_transformation.rules",
-                table_name="events",
-                table_type="preset",
-                description="Infrastructure events sourced from the log search API",
-            ),
-            PipelineRule(
-                name="traces",
-                title="Traces",
-                input_path=PROJECT_ROOT
-                / "sample_inputs"
-                / "traces"
-                / "api_isp_traceroute_15698000397185121.json",
-                rule_path=PROJECT_ROOT
-                / "sample_transformation_rules"
-                / "isp_trace_transformation.rules",
-                table_name="traces",
-                table_type="preset",
-                description="Traceroute output harvested from RCA payloads",
-                input_params={
-                    "entity_type": "ISP",
-                    "entity_id": "15698000397185121",
-                },
             ),
         )
 

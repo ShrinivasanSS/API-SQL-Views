@@ -33,6 +33,10 @@ def _rule_by_name(name: str) -> PipelineRule | None:
                 table_type=metadata["table_type"],
                 description=metadata["description"],
                 input_params=metadata.get("input_params", {}),
+                load_mode=metadata.get("load_mode", "replace"),
+                upsert_keys=tuple(metadata["upsert_keys"])
+                if metadata.get("upsert_keys")
+                else None,
             )
     return None
 
@@ -69,6 +73,7 @@ def api_status() -> Response:
             "credentials": current_app.config["CREDENTIALS"],
             "rules": current_app.config["PIPELINE_RULES"],
             "tables": tables,
+            "blueprints": current_app.config.get("BLUEPRINTS", {}),
         }
     )
 
@@ -212,6 +217,29 @@ def query_table() -> Response:
         return jsonify({"error": str(exc)}), 400
 
     return jsonify(result)
+
+
+@api_bp.get("/blueprints")
+def list_blueprints() -> Response:
+    payload = current_app.config.get("BLUEPRINTS", {})
+    items = [
+        {
+            "entity_type": entity_type,
+            **metadata,
+        }
+        for entity_type, metadata in payload.items()
+    ]
+    items.sort(key=lambda item: item["entity_type"].lower())
+    return jsonify(items)
+
+
+@api_bp.get("/blueprints/<string:entity_type>")
+def get_blueprint(entity_type: str) -> Response:
+    registry = current_app.config_obj.blueprint_registry
+    description = registry.describe_blueprint(entity_type)
+    if description is None:
+        return jsonify({"error": "Blueprint not found"}), 404
+    return jsonify(description)
 
 
 @api_bp.get("/views")

@@ -5,7 +5,21 @@ const state = {
   rules: [],
   tables: [],
   selectedTable: null,
+  blueprints: null,
+  blueprintDetails: {},
+  selectedBlueprint: null,
+  selectedBlueprintTable: null,
+  blueprintDrafts: {},
 };
+
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
 
 const viewCopy = {
   credentials: {
@@ -21,6 +35,11 @@ const viewCopy = {
     title: "Transformation Rules",
     description:
       "Python snippets that map raw API payloads into queryable observability tables.",
+  },
+  blueprints: {
+    title: "Blueprint Catalogue",
+    description:
+      "Registered entity blueprints with their declared tables, sample inputs, and rules.",
   },
   tables: {
     title: "Observability Tables",
@@ -412,6 +431,278 @@ async function executeSqlQuery() {
   }
 }
 
+async function ensureBlueprintsLoaded() {
+  if (state.blueprints !== null) {
+    return;
+  }
+  try {
+    const res = await fetch("/api/blueprints");
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+    const payload = await res.json();
+    state.blueprints = Array.isArray(payload) ? payload : [];
+  } catch (err) {
+    state.blueprints = [];
+    showPipelineStatus(`Unable to load blueprints: ${err.message}`, true);
+  }
+}
+
+function blueprintCardMarkup(blueprint) {
+  const tableBadges = (blueprint.sources || [])
+    .slice(0, 6)
+    .map(
+      (source) =>
+        `<li><span class="tag">${escapeHtml(source.pillar)}</span>${escapeHtml(
+          source.table_name
+        )}</li>`
+    )
+    .join("");
+  const overflowCount = Math.max((blueprint.sources || []).length - 6, 0);
+  const extraBadge =
+    overflowCount > 0
+      ? `<li><span class="tag">+${overflowCount}</span>more tables</li>`
+      : "";
+
+  return `
+    <div class="card blueprint-card" data-blueprint="${escapeHtml(
+      blueprint.entity_type
+    )}">
+      <div class="space-between">
+        <div>
+          <h3>${escapeHtml(blueprint.entity_type)}</h3>
+          <p class="muted text-xs">${escapeHtml(blueprint.path || "")}</p>
+        </div>
+        <span class="tag">${(blueprint.sources || []).length} tables</span>
+      </div>
+      <ul class="chip-list">${tableBadges}${extraBadge}</ul>
+      <p class="muted text-xs">Click to inspect table schemas and YAML.</p>
+    </div>`;
+}
+
+async function renderBlueprintsView() {
+  setViewHeader("blueprints");
+  await ensureBlueprintsLoaded();
+
+  const list = state.blueprints || [];
+  if (!list.length) {
+    contentPane().innerHTML = `<p class="muted">No blueprints registered yet.</p>`;
+  } else {
+    const cards = list.map(blueprintCardMarkup).join("");
+    contentPane().innerHTML = `<div class="card-column">${cards}</div>`;
+  }
+
+  contentPane()
+    .querySelectorAll(".card[data-blueprint]")
+    .forEach((card) => {
+      card.addEventListener("click", () => selectBlueprint(card.dataset.blueprint, card));
+      card.classList.toggle(
+        "selected",
+        card.dataset.blueprint === state.selectedBlueprint
+      );
+    });
+
+  renderBlueprintDetailPane();
+}
+
+async function selectBlueprint(entityType, element) {
+  if (!entityType) {
+    return;
+  }
+  state.selectedBlueprint = entityType;
+  state.selectedBlueprintTable = null;
+
+  contentPane()
+    .querySelectorAll(".card[data-blueprint]")
+    .forEach((card) => card.classList.toggle("selected", card === element));
+
+  if (!state.blueprintDetails[entityType]) {
+    detailTitle().textContent = `Blueprint · ${entityType}`;
+    detailPane().innerHTML = `<p class="muted">Loading blueprint definition…</p>`;
+    try {
+      const res = await fetch(`/api/blueprints/${encodeURIComponent(entityType)}`);
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+      state.blueprintDetails[entityType] = await res.json();
+    } catch (err) {
+      showPipelineStatus(`Unable to load blueprint: ${err.message}`, true);
+      return;
+    }
+  }
+
+  renderBlueprintDetailPane();
+}
+
+function renderBlueprintDetailValue(value, format = "text") {
+  if (value === undefined || value === null) {
+    return '<span class="muted">—</span>';
+  }
+
+  if (Array.isArray(value)) {
+    if (!value.length) {
+      return '<span class="muted">—</span>';
+    }
+    if (format === "chips" || format === "list") {
+      const items = value
+        .map((item) => `<li>${escapeHtml(item)}</li>`)
+        .join("");
+      return `<ul class="chip-list">${items}</ul>`;
+    }
+    return escapeHtml(value.join(", "));
+  }
+
+  if (typeof value === "object") {
+    if (!Object.keys(value).length) {
+      return '<span class="muted">—</span>';
+    }
+    return `<pre class="text-xs">${escapeHtml(JSON.stringify(value, null, 2))}</pre>`;
+  }
+
+  if (format === "code") {
+    return `<pre class="text-xs">${escapeHtml(value)}</pre>`;
+  }
+
+  const trimmed = String(value).trim();
+  if (!trimmed) {
+    return '<span class="muted">—</span>';
+  }
+  return escapeHtml(trimmed);
+}
+
+function renderBlueprintDetailPane() {
+  if (!state.selectedBlueprint) {
+    detailTitle().textContent = "Blueprint Explorer";
+    detailPane().innerHTML =
+      '<p class="muted">Select a blueprint to inspect its tables and YAML definition.</p>';
+    return;
+  }
+
+  const details = state.blueprintDetails[state.selectedBlueprint];
+  if (!details) {
+    detailTitle().textContent = `Blueprint · ${state.selectedBlueprint}`;
+    detailPane().innerHTML = '<p class="muted">Loading blueprint definition…</p>';
+    return;
+  }
+
+  detailTitle().textContent = `Blueprint · ${details.entity_type}`;
+
+  if (!state.selectedBlueprintTable && details.tables.length) {
+    state.selectedBlueprintTable = details.tables[0].id;
+  }
+
+  const tableOptions = details.tables
+    .map(
+      (table) =>
+        `<option value="${escapeHtml(table.id)}" ${
+          table.id === state.selectedBlueprintTable ? "selected" : ""
+        }>${escapeHtml(table.pillar)} · ${escapeHtml(table.table)}</option>`
+    )
+    .join("");
+
+  const activeTable = details.tables.find(
+    (table) => table.id === state.selectedBlueprintTable
+  );
+
+  const tableRows = activeTable
+    ? [
+        { label: "Pillar", value: activeTable.pillar },
+        { label: "Source type", value: activeTable.type },
+        { label: "Loads into table", value: activeTable.table },
+        { label: "Upsert keys", value: activeTable.upsert_keys, format: "chips" },
+        {
+          label: "Transform rules",
+          value: activeTable.transform_rules,
+          format: "list",
+        },
+        { label: "Sample input", value: activeTable.sample_input },
+        { label: "API", value: activeTable.api, format: "code" },
+        { label: "Inputs", value: activeTable.inputs },
+        { label: "Pagination", value: activeTable.pagination },
+        { label: "Schedule", value: activeTable.schedule },
+        { label: "Filter", value: activeTable.filter_expression },
+        { label: "Extra", value: activeTable.extra },
+      ]
+        .map(
+          (row) =>
+            `<tr><th>${escapeHtml(row.label)}</th><td>${renderBlueprintDetailValue(
+              row.value,
+              row.format
+            )}</td></tr>`
+        )
+        .join("")
+    : '<tr><td colspan="2" class="muted">Select a table to view its configuration.</td></tr>';
+
+  detailPane().innerHTML = `
+    <div class="right-pane-block">
+      <h4>Table Configuration</h4>
+      <select id="blueprint-table-select">
+        ${tableOptions}
+      </select>
+      <table class="kv-table">
+        <tbody>${tableRows}</tbody>
+      </table>
+    </div>
+    <div class="right-pane-block">
+      <h4>Blueprint YAML</h4>
+      <textarea id="blueprint-editor"></textarea>
+      <div class="flex">
+        <button class="secondary" id="copy-blueprint-yaml">Copy YAML</button>
+        <button class="secondary" id="reset-blueprint-yaml">Reset</button>
+      </div>
+      <p class="muted text-xs">Edits stay in the browser for preview only.</p>
+    </div>
+  `;
+
+  const select = document.getElementById("blueprint-table-select");
+  if (select) {
+    select.addEventListener("change", handleBlueprintTableChange);
+  }
+
+  const editor = document.getElementById("blueprint-editor");
+  if (editor) {
+    const draft = state.blueprintDrafts[state.selectedBlueprint];
+    editor.value = draft !== undefined ? draft : details.yaml;
+    editor.addEventListener("input", () => {
+      state.blueprintDrafts[state.selectedBlueprint] = editor.value;
+    });
+  }
+
+  const copyButton = document.getElementById("copy-blueprint-yaml");
+  if (copyButton && editor) {
+    copyButton.addEventListener("click", async () => {
+      await copyBlueprintYaml(editor.value);
+    });
+  }
+
+  const resetButton = document.getElementById("reset-blueprint-yaml");
+  if (resetButton && editor) {
+    resetButton.addEventListener("click", () => {
+      editor.value = details.yaml;
+      state.blueprintDrafts[state.selectedBlueprint] = details.yaml;
+      showPipelineStatus("Blueprint YAML reset to original.");
+    });
+  }
+}
+
+function handleBlueprintTableChange(event) {
+  state.selectedBlueprintTable = event.target.value;
+  renderBlueprintDetailPane();
+}
+
+async function copyBlueprintYaml(value) {
+  if (!value) {
+    showPipelineStatus("Blueprint YAML is empty", true);
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(value);
+    showPipelineStatus("Blueprint YAML copied to clipboard.");
+  } catch (err) {
+    showPipelineStatus(`Unable to copy YAML: ${err.message}`, true);
+  }
+}
+
 async function renderPlaceholderView(key) {
   setViewHeader(key);
   contentPane().innerHTML = `<div class="card"><p class="muted">${viewCopy[key].description}</p></div>`;
@@ -457,6 +748,9 @@ async function handleNavigation(event) {
       break;
     case "rules":
       await renderRulesView();
+      break;
+    case "blueprints":
+      await renderBlueprintsView();
       break;
     case "tables":
       await renderTablesView();

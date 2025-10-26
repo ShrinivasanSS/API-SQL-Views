@@ -30,7 +30,12 @@ def execute_rule(
 ) -> pd.DataFrame:
     """Execute a transformation rule and return the resulting DataFrame."""
 
-    env: Dict[str, Any] = {"pd": pd, "df_input": df_input, "INPUT_PARAMS": rule.input_params}
+    env: Dict[str, Any] = {
+        "pd": pd,
+        "df_input": df_input,
+        "INPUT_PARAMS": rule.input_params,
+        "__builtins__": __builtins__,
+    }
     if extra_globals:
         env.update(extra_globals)
 
@@ -39,7 +44,7 @@ def execute_rule(
         if rule_override is not None
         else rule.rule_path.read_text(encoding="utf-8")
     )
-    exec(rule_source, {}, env)
+    exec(rule_source, env)
 
     if "df_output" not in env:
         raise RuntimeError(f"Rule {rule.rule_path.name} did not define df_output")
@@ -53,20 +58,59 @@ def execute_rule(
     return df_output
 
 
-def load_dataframe_to_sqlite(df: pd.DataFrame, table_name: str, database_path: Path) -> None:
-    """Replace a table with the given DataFrame contents in SQLite."""
+def load_dataframe_to_sqlite(df: pd.DataFrame, rule: PipelineRule, database_path: Path) -> None:
+    """Load a DataFrame into SQLite honouring the rule's load semantics."""
 
+    table_name = rule.table_name
+    mode = (rule.load_mode or "replace").lower()
     database_path.parent.mkdir(exist_ok=True)
+
     with sqlite3.connect(database_path) as conn:
-        df.to_sql(table_name, conn, if_exists="replace", index=False)
+        if mode == "replace":
+            df.to_sql(table_name, conn, if_exists="replace", index=False)
+            return
+
+        if mode == "append":
+            df.to_sql(table_name, conn, if_exists="append", index=False)
+            return
+
+        if mode == "upsert":
+            if rule.upsert_keys is None:
+                df.to_sql(table_name, conn, if_exists="append", index=False)
+                return
+
+            existing = None
+            try:
+                existing = pd.read_sql_query(f"SELECT * FROM {table_name}", conn)
+            except Exception:
+                # Table does not exist yet – behave like replace
+                df.to_sql(table_name, conn, if_exists="replace", index=False)
+                return
+
+            combined = pd.concat([existing, df], ignore_index=True)
+            combined = combined.drop_duplicates(
+                subset=list(rule.upsert_keys), keep="last"
+            )
+            combined.to_sql(table_name, conn, if_exists="replace", index=False)
+            return
+
+        raise ValueError(f"Unsupported load mode: {rule.load_mode}")
 
 
-def run_pipeline_rule(rule: PipelineRule, database_path: Path) -> Dict[str, Any]:
+def run_pipeline_rule(
+    rule: PipelineRule,
+    database_path: Path,
+    *,
+    extra_globals: Dict[str, Any] | None = None,
+    rule_override: str | None = None,
+) -> Dict[str, Any]:
     """Execute a single rule end-to-end and store the result."""
 
     df_input = load_json_payload(rule.input_path)
-    df_output = execute_rule(df_input, rule)
-    load_dataframe_to_sqlite(df_output, rule.table_name, database_path)
+    df_output = execute_rule(
+        df_input, rule, extra_globals=extra_globals, rule_override=rule_override
+    )
+    load_dataframe_to_sqlite(df_output, rule, database_path)
 
     csv_buffer = io.StringIO()
     df_output.to_csv(csv_buffer, index=False)
@@ -85,6 +129,93 @@ def run_full_pipeline(config: AppConfig) -> List[Dict[str, Any]]:
     results = []
     for rule in config.pipeline_rules:
         results.append(run_pipeline_rule(rule, config.database_path))
+    results.extend(run_blueprint_pipeline(config))
+    return results
+
+
+def run_blueprint_pipeline(config: AppConfig) -> List[Dict[str, Any]]:
+    """Execute blueprint-driven sources for every known entity."""
+
+    registry = config.blueprint_registry
+    if registry.is_empty():
+        return []
+
+    try:
+        with sqlite3.connect(config.database_path) as conn:
+            entities_df = pd.read_sql_query("SELECT * FROM entities", conn)
+    except Exception:
+        return []
+
+    if entities_df.empty:
+        return []
+
+    results: List[Dict[str, Any]] = []
+    for entity in entities_df.to_dict(orient="records"):
+        entity_type = (entity.get("EntityType") or "").strip()
+        if not entity_type:
+            continue
+
+        blueprint = registry.get(entity_type)
+        if blueprint is None:
+            continue
+
+        entity_id = entity.get("EntityID")
+        entity_name = entity.get("EntityName", "")
+
+        for source in blueprint.iter_sources():
+            if not source.transform_rules or source.sample_input is None:
+                continue
+
+            params = {**source.inputs}
+            params.setdefault("entity_type", entity_type)
+            params.setdefault("entity_id", entity_id)
+            params.setdefault("entity_name", entity_name)
+            params.setdefault("blueprint_entity_type", blueprint.entity_type)
+            params.setdefault("blueprint_source_type", source.type)
+            if source.filter_expression:
+                params.setdefault("filter_expression", source.filter_expression)
+
+            context_globals = {
+                "ENTITY_ROW": entity,
+                "BLUEPRINT_SOURCE": {
+                    "pillar": source.pillar,
+                    "type": source.type,
+                    "api": source.api,
+                    "pagination": source.pagination,
+                    "schedule": source.schedule,
+                    "filter_expression": source.filter_expression,
+                },
+            }
+
+            upsert_keys = source.upsert_keys or blueprint.default_upsert_keys(
+                source.pillar
+            )
+            load_mode = "upsert" if upsert_keys else "replace"
+
+            for rule_path in source.transform_rules:
+                rule = PipelineRule(
+                    name=f"{source.pillar}:{source.type}:{entity_id}:{rule_path.stem}",
+                    title=f"{entity_type} {source.pillar} · {source.type}",
+                    input_path=source.sample_input,
+                    rule_path=rule_path,
+                    table_name=source.load_table,
+                    table_type="preset",
+                    description=(
+                        f"Blueprint source '{source.type}' for {entity_type} {source.pillar}"
+                    ),
+                    input_params=dict(params),
+                    load_mode=load_mode,
+                    upsert_keys=upsert_keys,
+                )
+
+                results.append(
+                    run_pipeline_rule(
+                        rule,
+                        config.database_path,
+                        extra_globals=context_globals,
+                    )
+                )
+
     return results
 
 
@@ -137,6 +268,7 @@ def run_sql_query(database_path: Path, query: str) -> Dict[str, Any]:
 __all__ = [
     "run_full_pipeline",
     "run_pipeline_rule",
+    "run_blueprint_pipeline",
     "ensure_database_seeded",
     "fetch_table_list",
     "run_sql_query",

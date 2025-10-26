@@ -1,0 +1,102 @@
+version: 1
+
+entity:
+  entityType: ISP
+  entityIdField: EntityID
+
+defaults:
+  upsert:
+    metrics:
+      - EntityType
+      - EntityID
+      - EntityInstance
+      - MetricName
+    traces:
+      - TraceEntityType
+      - TraceEntityID
+      - TraceType
+      - TraceInstance
+    logs:
+      - LogEntityType
+      - LogEntityID
+      - LogType
+      - collection_time
+    events:
+      - EntityType
+      - EntityID
+      - EventType
+      - EventTime
+      - EventId
+
+metrics:
+  - type: isp_tabular
+    api: /app/api/isp/tabulardetails/{monitor_id}
+    sample_input: sample_inputs/metrics/api_isp_tabular_details_15698000397185121.json
+    transform_rules:
+      - sample_transformation_rules/isp_tabulardata_metric_transformation.rules
+    inputs:
+      metric_units:
+        packet_loss: "%"
+        latency: "ms"
+        mtu: "bytes"
+        jitter: "ms"
+        asnumber_count: "count"
+        hop_count: "count"
+    load:
+      table: metrics
+
+traces:
+  - type: traceroute
+    api: /api/isp/traceroute/{monitor_id}
+    sample_input: sample_inputs/traces/api_isp_traceroute_15698000397185121.json
+    transform_rules:
+      - sample_transformation_rules/isp_trace_transformation.rules
+    load:
+      table: traces
+
+logs:
+  - type: availability_log
+    api: /api/reports/log_reports/{monitor_id}?date={today}
+    sample_input: sample_inputs/logs/api_15698000397185121_logreport.json
+    transform_rules:
+      - sample_transformation_rules/isp_logreport_transformation.rules
+    load:
+      table: logs
+
+events:
+  - type: infrastructure
+    filter:
+      expression: 'logtype="Infrastructure Events" and source="ISP"'
+    api:
+      path: /api/applog/search/{start_date}%20{start_time}/{end_date}%20{end_time}/{range}/desc?
+      query_param: q
+    sample_input: sample_inputs/events/api_infrastructure_events_isp.json
+    pagination:
+      page_size: 100
+      start_index: 1
+      max_pages: 1
+    schedule:
+      lookback: "24h"
+      align_to: "now"
+    transform_rules:
+      - sample_transformation_rules/eventlogs_transformation.rules
+    inputs:
+      event_type: Infrastructure
+      event_source: ISP
+    load:
+      table: events
+      upsert_keys:
+        - EntityType
+        - EntityID
+        - EventId
+
+views:
+  - name: isp_latest_health
+    sql_template: |
+      SELECT e.EntityID, e.EntityName, m.MetricName, m.CurrentValue
+      FROM Entities e
+      JOIN Metrics m ON m.EntityID = e.EntityID
+      WHERE e.EntityType = :entity_type
+      ORDER BY m.EntityID, m.MetricName
+    params:
+      entity_type: ISP
