@@ -51,6 +51,15 @@ class BlueprintSource:
             "blueprint": entity_type,
             "load_mode": "replace",
             "upsert_keys": None,
+            "source_type": self.type,
+            "transform_rules": [_rel(path) for path in self.transform_rules],
+            "sample_input": _rel(self.sample_input),
+            "upsert_override": list(self.upsert_keys) if self.upsert_keys else None,
+            "api": self.api,
+            "schedule": self.schedule,
+            "pagination": self.pagination,
+            "filter_expression": self.filter_expression,
+            "extra": self.extra,
         }
 
 
@@ -118,6 +127,47 @@ class BlueprintRegistry:
                 "views": blueprint.views,
             }
         return summary
+
+    def describe_blueprint(self, entity_type: str) -> Dict[str, Any] | None:
+        blueprint = self.get(entity_type)
+        if blueprint is None:
+            return None
+
+        tables: List[Dict[str, Any]] = []
+        for source in blueprint.iter_sources():
+            default_keys = blueprint.default_upsert_keys(source.pillar)
+            tables.append(
+                {
+                    "id": f"{entity_type}:{source.pillar}:{source.type}",
+                    "pillar": source.pillar,
+                    "type": source.type,
+                    "table": source.load_table,
+                    "upsert_keys": list(source.upsert_keys or default_keys or ()),
+                    "transform_rules": [
+                        self._relative(path) for path in source.transform_rules
+                    ],
+                    "sample_input": self._relative(source.sample_input)
+                    if source.sample_input
+                    else "",
+                    "api": source.api,
+                    "inputs": source.inputs,
+                    "pagination": source.pagination,
+                    "schedule": source.schedule,
+                    "filter_expression": source.filter_expression,
+                    "extra": source.extra,
+                }
+            )
+
+        return {
+            "entity_type": blueprint.entity_type,
+            "path": self._relative(blueprint.path),
+            "tables": tables,
+            "views": blueprint.views,
+            "defaults": {
+                pillar: list(keys) for pillar, keys in blueprint.defaults_upsert.items()
+            },
+            "yaml": blueprint.path.read_text(encoding="utf-8"),
+        }
 
     def list_source_rules(self) -> List[Dict[str, Any]]:
         metadata: List[Dict[str, Any]] = []
