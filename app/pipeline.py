@@ -17,7 +17,7 @@ from .config import AppConfig, PipelineRule
 def load_json_payload(path: Path) -> pd.DataFrame:
     """Load an arbitrary JSON file into a single-row pandas DataFrame."""
 
-    data = json.loads(path.read_text())
+    data = json.loads(path.read_text(encoding="utf-8"))
     return pd.DataFrame([data])
 
 
@@ -34,7 +34,11 @@ def execute_rule(
     if extra_globals:
         env.update(extra_globals)
 
-    rule_source = rule_override if rule_override is not None else rule.rule_path.read_text()
+    rule_source = (
+        rule_override
+        if rule_override is not None
+        else rule.rule_path.read_text(encoding="utf-8")
+    )
     exec(rule_source, {}, env)
 
     if "df_output" not in env:
