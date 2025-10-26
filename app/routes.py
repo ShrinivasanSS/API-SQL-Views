@@ -110,7 +110,7 @@ def list_rules() -> Response:
     rules = []
     for metadata in current_app.config["PIPELINE_RULES"]:
         path = PROJECT_ROOT / metadata["rule"]
-        rules.append({**metadata, "content": path.read_text()})
+        rules.append({**metadata, "content": path.read_text(encoding="utf-8")})
 
     for path in sorted(USER_RULES_DIR.glob("*.rules")):
         rules.append(
@@ -122,7 +122,7 @@ def list_rules() -> Response:
                 "table_name": "",
                 "table_type": "custom",
                 "description": "User supplied rule",
-                "content": path.read_text(),
+                "content": path.read_text(encoding="utf-8"),
                 "input_params": {},
             }
         )
@@ -139,7 +139,7 @@ def create_rule() -> Response:
         return jsonify({"error": "Both name and content are required"}), 400
 
     path = USER_RULES_DIR / f"{name}.rules"
-    path.write_text(content)
+    path.write_text(content, encoding="utf-8")
 
     return jsonify({"status": "created", "path": str(path.relative_to(PROJECT_ROOT))})
 

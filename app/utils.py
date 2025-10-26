@@ -18,11 +18,11 @@ def safe_resolve(base: Path, relative: str) -> Path:
 
 
 def load_json(path: Path) -> Any:
-    return json.loads(path.read_text())
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def preview_json(path: Path, *, limit: int = 280) -> str:
-    text = path.read_text()
+    text = path.read_text(encoding="utf-8")
     return text[:limit] + ("…" if len(text) > limit else "")
 
 
