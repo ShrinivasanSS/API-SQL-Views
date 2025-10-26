@@ -9,6 +9,6 @@ ENTITY_METRICS_API=["https://www.example.com/app/api/isp/tabulardetails/{entity_
 # List of APIs that can fetch the entity traces. 
 ENTITY_TRACES_API=["https://www.example.com/app/api/isp/traceroute/{entity_id}"]
 # List of APIs that give logs associated with the entity. 
-ENTITY_LOGS_API=["https://www.site24x7.com/app/api/reports/log_reports/{entity_id}?date={today}"]
+ENTITY_LOGS_API=["https://www.example.com/app/api/reports/log_reports/{entity_id}?date={today}"]
 # Event Log query to fetch the entity's events. 
 ENTITY_EVENTS_QUERY_API=["logtype=\"Infrastructure Events\" and source=\"ISP\""]
