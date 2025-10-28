@@ -11,7 +11,7 @@ entity:
         table_name: entities
         source:
           kind: api
-          endpoint: /app/api/entities/current
+          endpoint: /api/current_status
           parameters:
             entity_type:
               source: params.entity_filter
