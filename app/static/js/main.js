@@ -453,9 +453,9 @@ function blueprintCardMarkup(blueprint) {
     .slice(0, 6)
     .map(
       (source) =>
-        `<li><span class="tag">${escapeHtml(source.pillar)}</span>${escapeHtml(
-          source.table_name
-        )}</li>`
+        `<li><span class="tag">${escapeHtml(
+          source.table_type || source.pillar || ""
+        )}</span>${escapeHtml(source.table_name || "")}</li>`
     )
     .join("");
   const overflowCount = Math.max((blueprint.sources || []).length - 6, 0);
@@ -596,7 +596,8 @@ function renderBlueprintDetailPane() {
       (table) =>
         `<option value="${escapeHtml(table.id)}" ${
           table.id === state.selectedBlueprintTable ? "selected" : ""
-        }>${escapeHtml(table.pillar)} · ${escapeHtml(table.table)}</option>`
+        }>${escapeHtml(table.table_type || table.type || "")}
+        · ${escapeHtml(table.table_name || table.table || "")}</option>`
     )
     .join("");
 
@@ -604,34 +605,94 @@ function renderBlueprintDetailPane() {
     (table) => table.id === state.selectedBlueprintTable
   );
 
-  const tableRows = activeTable
-    ? [
-        { label: "Pillar", value: activeTable.pillar },
-        { label: "Source type", value: activeTable.type },
-        { label: "Loads into table", value: activeTable.table },
-        { label: "Upsert keys", value: activeTable.upsert_keys, format: "chips" },
-        {
-          label: "Transform rules",
-          value: activeTable.transform_rules,
-          format: "list",
-        },
-        { label: "Sample input", value: activeTable.sample_input },
-        { label: "API", value: activeTable.api, format: "code" },
-        { label: "Inputs", value: activeTable.inputs },
-        { label: "Pagination", value: activeTable.pagination },
-        { label: "Schedule", value: activeTable.schedule },
-        { label: "Filter", value: activeTable.filter_expression },
-        { label: "Extra", value: activeTable.extra },
-      ]
-        .map(
-          (row) =>
-            `<tr><th>${escapeHtml(row.label)}</th><td>${renderBlueprintDetailValue(
-              row.value,
-              row.format
-            )}</td></tr>`
-        )
-        .join("")
-    : '<tr><td colspan="2" class="muted">Select a table to view its configuration.</td></tr>';
+  let tableRows =
+    '<tr><td colspan="2" class="muted">Select a table to view its configuration.</td></tr>';
+
+  if (activeTable) {
+    const parameterSummary = Object.entries(
+      (activeTable.source && activeTable.source.parameters) || {}
+    ).map(([name, spec]) => {
+      if (spec && typeof spec === "object") {
+        const parts = [];
+        if (spec.source) parts.push(`source=${spec.source}`);
+        if (spec.value !== undefined)
+          parts.push(`value=${String(spec.value)}`);
+        if (spec.default !== undefined)
+          parts.push(`default=${String(spec.default)}`);
+        if (spec.required) parts.push("required");
+        if (spec.description) parts.push(String(spec.description));
+        const detail = parts.length ? parts.join(" · ") : "—";
+        return `${name}: ${detail}`;
+      }
+      return `${name}: ${String(spec)}`;
+    });
+
+    const extractorSummary = (activeTable.extractors || []).map((extractor) =>
+      extractor.output_row_name
+        ? `${extractor.name} → ${extractor.output_row_name}`
+        : extractor.name
+    );
+
+    const samplePath =
+      (activeTable.sample && activeTable.sample.path) || activeTable.sample_input;
+
+    const rows = [
+      { label: "Pillar", value: activeTable.pillar },
+      { label: "Table type", value: activeTable.table_type || activeTable.type },
+      { label: "Destination table", value: activeTable.table_name || activeTable.table },
+      { label: "Description", value: activeTable.description },
+      { label: "Upsert keys", value: activeTable.upsert_keys, format: "chips" },
+      {
+        label: "Extractors",
+        value: extractorSummary,
+        format: "list",
+      },
+      {
+        label: "Transform rules",
+        value: activeTable.transformations,
+        format: "list",
+      },
+      { label: "Sample input", value: samplePath },
+      {
+        label: "Sample format",
+        value: activeTable.sample && activeTable.sample.format,
+      },
+      {
+        label: "Source kind",
+        value: activeTable.source && activeTable.source.kind,
+      },
+      {
+        label: "Endpoint",
+        value: activeTable.source && activeTable.source.endpoint,
+        format: "code",
+      },
+      {
+        label: "HTTP method",
+        value: activeTable.source && activeTable.source.method,
+      },
+      {
+        label: "Source config",
+        value: activeTable.source && activeTable.source.config,
+      },
+      {
+        label: "Source parameters",
+        value: parameterSummary,
+        format: "list",
+      },
+      { label: "Inputs", value: activeTable.inputs },
+      { label: "Metadata", value: activeTable.metadata },
+    ];
+
+    tableRows = rows
+      .map(
+        (row) =>
+          `<tr><th>${escapeHtml(row.label)}</th><td>${renderBlueprintDetailValue(
+            row.value,
+            row.format
+          )}</td></tr>`
+      )
+      .join("");
+  }
 
   detailPane().innerHTML = `
     <div class="right-pane-block">

@@ -2,16 +2,12 @@ import hashlib
 import json
 from datetime import datetime
 
-# ------------------------------------------------------------------
-# 1️⃣ Load the nested JSON from df_input (one row)
-json_data = df_input.iloc[0].to_dict()
-
 entity_type = INPUT_PARAMS.get("entity_type", "")
 entity_id = INPUT_PARAMS.get("entity_id")
 entity_name = INPUT_PARAMS.get("entity_name", "")
 default_event_type = INPUT_PARAMS.get("event_type", "")
 event_source = INPUT_PARAMS.get("event_source", "") or INPUT_PARAMS.get(
-    "blueprint_source_type", ""
+    "blueprint_table_type", ""
 )
 
 
@@ -38,57 +34,74 @@ def _normalise_time(raw_value: object) -> str | None:
     return str(raw_value)
 
 
-def _derive_event_id(doc: dict, fallback: str) -> str:
-    event_id = doc.get("_zl_unique_id") or doc.get("_zlf_eventid")
-    if event_id:
-        return str(event_id)
-
-    payload = fallback.encode("utf-8", errors="ignore")
-    return hashlib.sha1(payload).hexdigest()
+def _load_payload(raw: object) -> dict:
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str) and raw:
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            return {}
+    return {}
 
 
 rows = []
+for _, row in df_input.iterrows():
+    payload = _load_payload(row.get("Raw"))
+    message = row.get("Message") or payload.get("message", "")
+    severity = row.get("Severity") or payload.get("severity")
+    source = row.get("Source") or payload.get("source") or event_source
+    monitor_id = row.get("MonitorId") or payload.get("monitorid") or entity_id
+    event_type = row.get("EventType") or payload.get("eventtype") or default_event_type
 
-for doc in json_data.get("data", {}).get("docs", []):
-    message = doc.get("message", "")
     event_time_raw = (
-        doc.get("_zlf__zl_received_time")
-        or doc.get("_zl_received_time")
-        or doc.get("_zl_timestamp")
+        row.get("ReceivedTime")
+        or row.get("Timestamp")
+        or payload.get("_zlf__zl_received_time")
+        or payload.get("_zl_received_time")
+        or payload.get("_zl_timestamp")
     )
     iso_event_time = _normalise_time(event_time_raw)
 
-    raw_payload = json.dumps(doc, separators=(",", ":"), ensure_ascii=False)
-    fallback_key = f"{entity_id}|{event_time_raw}|{message}"
-    event_id_value = _derive_event_id(doc, fallback_key)
+    raw_json = row.get("Raw")
+    if not isinstance(raw_json, str):
+        raw_json = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
+
+    unique_id = (
+        payload.get("_zl_unique_id")
+        or payload.get("_zlf_eventid")
+        or payload.get("_zl_id")
+    )
+    if not unique_id:
+        fallback = f"{monitor_id}|{event_time_raw}|{message}"
+        unique_id = hashlib.sha1(fallback.encode("utf-8", errors="ignore")).hexdigest()
 
     rows.append(
         {
             "EntityType": entity_type,
-            "EntityID": entity_id,
+            "EntityID": monitor_id or entity_id,
             "EntityName": entity_name,
-            "EventType": doc.get("eventtype") or default_event_type,
+            "EventType": event_type,
             "EventTime": iso_event_time,
-            "Severity": doc.get("severity"),
-            "Source": doc.get("source") or event_source,
+            "Severity": severity,
+            "Source": source,
             "Message": message,
-            "EventId": event_id_value,
-            "Raw": raw_payload,
+            "EventId": str(unique_id),
+            "Raw": raw_json,
         }
     )
 
-df_output = pd.DataFrame(
-    rows,
-    columns=[
-        "EntityType",
-        "EntityID",
-        "EntityName",
-        "EventType",
-        "EventTime",
-        "Severity",
-        "Source",
-        "Message",
-        "EventId",
-        "Raw",
-    ],
-)
+columns = [
+    "EntityType",
+    "EntityID",
+    "EntityName",
+    "EventType",
+    "EventTime",
+    "Severity",
+    "Source",
+    "Message",
+    "EventId",
+    "Raw",
+]
+
+df_output = pd.DataFrame(rows, columns=columns)

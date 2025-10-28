@@ -5,32 +5,38 @@ from __future__ import annotations
 import csv
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
+from typing import Any, Dict, Iterable, List, Mapping, Sequence
 
 import yaml
 
+from .extractors import ExtractorDefinition
+
 
 @dataclass(slots=True)
-class BlueprintSource:
-    """Configuration for a single data source within a pillar."""
+class BlueprintTable:
+    """Declarative definition for a blueprint-backed table."""
 
-    pillar: str
+    kind: str
     type: str
-    api: Any
-    transform_rules: tuple[Path, ...]
-    load_table: str
+    table_name: str
+    source_kind: str
+    source_config: Dict[str, Any]
+    source_endpoint: str | None
+    source_method: str | None
+    source_parameters: Dict[str, Any]
+    sample_path: Path | None
+    sample_format: str | None
+    extractors: tuple[ExtractorDefinition, ...]
+    transformations: tuple[Path, ...]
+    inputs: Dict[str, Any]
     upsert_keys: tuple[str, ...] | None
-    sample_input: Path | None
-    inputs: Dict[str, Any] = field(default_factory=dict)
-    pagination: Dict[str, Any] = field(default_factory=dict)
-    schedule: Dict[str, Any] = field(default_factory=dict)
-    filter_expression: str | None = None
-    extra: Dict[str, Any] = field(default_factory=dict)
+    description: str | None
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
     def to_metadata(self, project_root: Path, *, entity_type: str) -> Dict[str, Any]:
-        """Summarise the source for UI consumption."""
+        """Summarise the table for UI consumption."""
 
-        def _rel(path: Path | None) -> str:
+        def _relative(path: Path | None) -> str:
             if path is None:
                 return ""
             try:
@@ -38,29 +44,28 @@ class BlueprintSource:
             except ValueError:
                 return str(path)
 
-        return {
-            "name": f"{entity_type}:{self.pillar}:{self.type}",
-            "title": f"{entity_type} {self.pillar} · {self.type}",
-            "input": _rel(self.sample_input),
-            "rule": _rel(self.transform_rules[0]) if self.transform_rules else "",
-            "table_name": self.load_table,
-            "table_type": "preset",
-            "description": f"Blueprint source for {entity_type} {self.pillar}",
+        metadata: Dict[str, Any] = {
+            "name": f"{entity_type}:{self.type}:{self.table_name}",
+            "title": f"{entity_type} {self.type} · {self.table_name}",
+            "input": _relative(self.sample_path),
+            "rule": _relative(self.transformations[0]) if self.transformations else "",
+            "table_name": self.table_name,
+            "table_type": self.kind,
+            "description": self.description
+            or f"Blueprint table for {entity_type} {self.type}",
             "input_params": self.inputs,
-            "pillar": self.pillar,
-            "blueprint": entity_type,
-            "load_mode": "replace",
-            "upsert_keys": None,
-            "source_type": self.type,
-            "transform_rules": [_rel(path) for path in self.transform_rules],
-            "sample_input": _rel(self.sample_input),
-            "upsert_override": list(self.upsert_keys) if self.upsert_keys else None,
-            "api": self.api,
-            "schedule": self.schedule,
-            "pagination": self.pagination,
-            "filter_expression": self.filter_expression,
-            "extra": self.extra,
+            "load_mode": "upsert" if self.upsert_keys else "replace",
+            "upsert_keys": list(self.upsert_keys) if self.upsert_keys else None,
         }
+        metadata["source"] = {
+            "kind": self.source_kind,
+            "endpoint": self.source_endpoint,
+            "method": self.source_method,
+            "parameters": self.source_parameters,
+        }
+        if self.sample_format:
+            metadata["sample_format"] = self.sample_format
+        return metadata
 
 
 @dataclass(slots=True)
@@ -69,18 +74,18 @@ class Blueprint:
 
     entity_type: str
     entity_id_field: str
-    defaults_upsert: Dict[str, tuple[str, ...]]
-    sources: Dict[str, List[BlueprintSource]]
+    tables: tuple[BlueprintTable, ...]
     views: List[Dict[str, Any]]
+    defaults_upsert: Dict[str, tuple[str, ...]]
+    metadata: Dict[str, Any]
     path: Path
     raw: Dict[str, Any] = field(default_factory=dict)
 
-    def iter_sources(self) -> Iterable[BlueprintSource]:
-        for pillar_sources in self.sources.values():
-            yield from pillar_sources
+    def iter_tables(self) -> Iterable[BlueprintTable]:
+        yield from self.tables
 
-    def default_upsert_keys(self, pillar: str) -> tuple[str, ...] | None:
-        return self.defaults_upsert.get(pillar)
+    def default_upsert_keys(self, table_type: str) -> tuple[str, ...] | None:
+        return self.defaults_upsert.get(table_type)
 
 
 class BlueprintRegistry:
@@ -117,14 +122,24 @@ class BlueprintRegistry:
             blueprint = self.get(entity_type)
             if blueprint is None:
                 continue
+            tables = [
+                self._table_summary(table, entity_type=entity_type)
+                for table in blueprint.iter_tables()
+            ]
             sources = [
-                source.to_metadata(self.project_root, entity_type=entity_type)
-                for source in blueprint.iter_sources()
+                {
+                    "pillar": table["pillar"],
+                    "table_name": table["table_name"],
+                    "table_type": table["table_type"],
+                }
+                for table in tables
             ]
             summary[entity_type] = {
                 "path": self._relative(path),
+                "tables": tables,
                 "sources": sources,
                 "views": blueprint.views,
+                "metadata": blueprint.metadata,
             }
         return summary
 
@@ -134,52 +149,32 @@ class BlueprintRegistry:
             return None
 
         tables: List[Dict[str, Any]] = []
-        for source in blueprint.iter_sources():
-            default_keys = blueprint.default_upsert_keys(source.pillar)
-            tables.append(
-                {
-                    "id": f"{entity_type}:{source.pillar}:{source.type}",
-                    "pillar": source.pillar,
-                    "type": source.type,
-                    "table": source.load_table,
-                    "upsert_keys": list(source.upsert_keys or default_keys or ()),
-                    "transform_rules": [
-                        self._relative(path) for path in source.transform_rules
-                    ],
-                    "sample_input": self._relative(source.sample_input)
-                    if source.sample_input
-                    else "",
-                    "api": source.api,
-                    "inputs": source.inputs,
-                    "pagination": source.pagination,
-                    "schedule": source.schedule,
-                    "filter_expression": source.filter_expression,
-                    "extra": source.extra,
-                }
-            )
+        for table in blueprint.iter_tables():
+            tables.append(self._table_summary(table, entity_type=entity_type))
 
         return {
             "entity_type": blueprint.entity_type,
+            "entity_id_field": blueprint.entity_id_field,
             "path": self._relative(blueprint.path),
             "tables": tables,
             "views": blueprint.views,
             "defaults": {
-                pillar: list(keys) for pillar, keys in blueprint.defaults_upsert.items()
+                key: list(values) for key, values in blueprint.defaults_upsert.items()
             },
+            "metadata": blueprint.metadata,
             "yaml": blueprint.path.read_text(encoding="utf-8"),
         }
 
     def list_source_rules(self) -> List[Dict[str, Any]]:
         metadata: List[Dict[str, Any]] = []
-        for entity_type, path in self._mapping.items():
+        for entity_type, _ in self._mapping.items():
             blueprint = self.get(entity_type)
             if blueprint is None:
                 continue
-            for source in blueprint.iter_sources():
-                if not source.sample_input or not source.transform_rules:
+            for table in blueprint.iter_tables():
+                if not table.transformations or table.sample_path is None:
                     continue
-                # Use the first rule as the primary reference in the UI.
-                metadata.append(source.to_metadata(self.project_root, entity_type=entity_type))
+                metadata.append(table.to_metadata(self.project_root, entity_type=entity_type))
         return metadata
 
     def get(self, entity_type: str) -> Blueprint | None:
@@ -196,114 +191,228 @@ class BlueprintRegistry:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+    def _table_summary(
+        self, table: BlueprintTable, *, entity_type: str
+    ) -> Dict[str, Any]:
+        sample_path = self._relative(table.sample_path) if table.sample_path else ""
+        sample: Dict[str, Any] | None = None
+        if sample_path or table.sample_format:
+            sample = {
+                "path": sample_path,
+                "format": table.sample_format,
+            }
+
+        source = {
+            "kind": table.source_kind,
+            "endpoint": table.source_endpoint,
+            "method": table.source_method,
+            "parameters": table.source_parameters,
+            "config": table.source_config,
+        }
+
+        return {
+            "id": f"{entity_type}:{table.type}:{table.table_name}",
+            "pillar": table.kind,
+            "table_type": table.type,
+            "table_name": table.table_name,
+            "description": table.description,
+            "sample": sample,
+            "sample_input": sample_path,
+            "source": source,
+            "extractors": [
+                {
+                    "name": extractor.name,
+                    "config": extractor.config,
+                    "output_row_name": extractor.output_row_name,
+                    "merge_strategy": extractor.merge_strategy,
+                }
+                for extractor in table.extractors
+            ],
+            "transformations": [self._relative(path) for path in table.transformations],
+            "upsert_keys": list(table.upsert_keys or ()),
+            "inputs": table.inputs,
+            "metadata": table.metadata,
+        }
+
     def _load_blueprint(self, path: Path) -> Blueprint:
         data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        version = int(data.get("version", 1))
+        if version < 2:
+            raise ValueError(
+                f"Blueprint schema version {version} is no longer supported; "
+                "upgrade to version 2"
+            )
 
-        entity_meta = data.get("entity", {}) or {}
-        entity_type = (entity_meta.get("entityType") or path.stem).strip()
-        entity_id_field = entity_meta.get("entityIdField", "EntityID")
+        entity_section = data.get("entity") or {}
+        if isinstance(entity_section, Mapping):
+            entity_data = entity_section
+        elif isinstance(entity_section, Sequence) and entity_section:
+            entity_data = entity_section[0]
+        else:
+            entity_data = {}
 
-        defaults = data.get("defaults", {}) or {}
-        default_upsert: Dict[str, tuple[str, ...]] = {}
-        for pillar, keys in (defaults.get("upsert", {}) or {}).items():
-            if isinstance(keys, Sequence):
-                default_upsert[pillar] = tuple(str(key) for key in keys)
+        entity_type = (entity_data.get("type") or path.stem).strip()
+        entity_id_field = (entity_data.get("identifier") or "EntityID").strip()
 
-        sources: Dict[str, List[BlueprintSource]] = {}
-        for pillar in ("metrics", "traces", "logs", "events"):
-            items = data.get(pillar) or []
-            parsed: List[BlueprintSource] = []
-            for item in items:
-                if not isinstance(item, Mapping):
-                    continue
-                parsed.append(self._parse_source(pillar, item, base_dir=path.parent))
-            if parsed:
-                sources[pillar] = parsed
+        defaults_section = entity_data.get("defaults", {}) or {}
+        defaults_upsert: Dict[str, tuple[str, ...]] = {}
+        for key, values in (defaults_section.get("upsert") or {}).items():
+            if isinstance(values, Sequence) and not isinstance(values, (str, bytes, bytearray)):
+                defaults_upsert[str(key)] = tuple(str(v) for v in values)
 
-        views = data.get("views") or []
+        views = entity_data.get("views") or []
         if not isinstance(views, list):
             views = []
+
+        metadata = entity_data.get("metadata", {})
+        if not isinstance(metadata, Mapping):
+            metadata = {}
+        else:
+            metadata = dict(metadata)
+
+        tables_data = entity_data.get("tables") or []
+        tables: List[BlueprintTable] = []
+        for entry in tables_data:
+            if not isinstance(entry, Mapping):
+                continue
+            table = self._parse_table(entry, base_dir=path.parent)
+            if table is not None:
+                tables.append(table)
 
         return Blueprint(
             entity_type=entity_type,
             entity_id_field=entity_id_field,
-            defaults_upsert=default_upsert,
-            sources=sources,
+            tables=tuple(tables),
             views=views,
+            defaults_upsert=defaults_upsert,
+            metadata=metadata,
             path=path,
             raw=data,
         )
 
-    def _parse_source(
-        self, pillar: str, entry: Mapping[str, Any], *, base_dir: Path
-    ) -> BlueprintSource:
-        type_name = (entry.get("type") or pillar).strip()
-        api = entry.get("api")
-        transform_rules = tuple(
-            self._resolve_rule_path(rule, base_dir)
-            for rule in entry.get("transform_rules", [])
-            if isinstance(rule, str) and rule.strip()
+    def _parse_table(
+        self, entry: Mapping[str, Any], *, base_dir: Path
+    ) -> BlueprintTable | None:
+        kind = str(entry.get("kind") or "custom").strip() or "custom"
+        table_type = str(entry.get("type") or kind).strip() or kind
+        table_name = str(entry.get("table_name") or table_type).strip()
+        if not table_name:
+            table_name = table_type
+
+        source_section = entry.get("source") or {}
+        if not isinstance(source_section, Mapping):
+            source_section = {}
+        source_kind = str(source_section.get("kind") or "api").strip() or "api"
+        raw_config = source_section.get("config", {}) or {}
+        if not isinstance(raw_config, Mapping):
+            raw_config = {}
+        source_config = dict(raw_config)
+
+        raw_endpoint = source_section.get("endpoint") or source_config.pop("endpoint", None)
+        if raw_endpoint is None and source_kind == "api":
+            raw_endpoint = source_config.pop("path", None)
+        source_endpoint = str(raw_endpoint).strip() if raw_endpoint else None
+
+        raw_method = source_section.get("method") or source_config.pop("method", None)
+        source_method = str(raw_method).upper() if raw_method else ("GET" if source_kind == "api" else None)
+
+        parameters_section = source_section.get("parameters") or {}
+        source_parameters: Dict[str, Any] = {}
+        if isinstance(parameters_section, Mapping):
+            for name, spec in parameters_section.items():
+                key = str(name)
+                if isinstance(spec, Mapping):
+                    source_parameters[key] = dict(spec)
+                else:
+                    source_parameters[key] = {"value": spec}
+
+        sample_section = entry.get("sample") or {}
+        sample_path: Path | None = None
+        sample_format: str | None = None
+        if isinstance(sample_section, Mapping):
+            sample_path = self._resolve_optional_path(sample_section.get("path"), base_dir)
+            fmt = sample_section.get("format")
+            sample_format = str(fmt) if isinstance(fmt, str) and fmt.strip() else None
+
+        if sample_path is None:
+            legacy_sample = (
+                source_section.get("sample_input")
+                or raw_config.get("sample_input")
+                or source_config.get("sample_input")
+                or entry.get("sample_input")
+            )
+            sample_path = self._resolve_optional_path(legacy_sample, base_dir)
+
+        source_config.pop("sample_input", None)
+
+        extractors_config = entry.get("extractors") or []
+        extractors: List[ExtractorDefinition] = []
+        for extractor_entry in extractors_config:
+            if not isinstance(extractor_entry, Mapping):
+                continue
+            extractor_name = (extractor_entry.get("extractor") or "").strip()
+            if not extractor_name:
+                continue
+            config = extractor_entry.get("config", {}) or {}
+            if not isinstance(config, Mapping):
+                config = {}
+            extractors.append(
+                ExtractorDefinition(
+                    name=extractor_name,
+                    config=dict(config),
+                    output_row_name=extractor_entry.get("output_row_name"),
+                    merge_strategy=extractor_entry.get("merge_strategy"),
+                )
+            )
+
+        transformations = tuple(
+            self._resolve_rule_path(path, base_dir)
+            for path in entry.get("transformations", [])
+            if isinstance(path, str) and path.strip()
         )
-        load = entry.get("load", {}) or {}
-        table = (load.get("table") or pillar).strip()
-        if not table:
-            table = pillar
-        table = table.lower()
-
-        upsert_override = load.get("upsert_keys")
-        upsert_keys: tuple[str, ...] | None = None
-        if isinstance(upsert_override, Sequence) and not isinstance(upsert_override, (str, bytes)):
-            upsert_keys = tuple(str(key) for key in upsert_override)
-
-        sample_input = self._resolve_optional_path(entry.get("sample_input"), base_dir)
 
         inputs = entry.get("inputs", {}) or {}
         if not isinstance(inputs, Mapping):
             inputs = {}
+        else:
+            inputs = dict(inputs)
 
-        pagination = entry.get("pagination", {}) or {}
-        if not isinstance(pagination, Mapping):
-            pagination = {}
+        metadata = entry.get("metadata", {}) or {}
+        if not isinstance(metadata, Mapping):
+            metadata = {}
+        metadata = dict(metadata)
 
-        schedule = entry.get("schedule", {}) or {}
-        if not isinstance(schedule, Mapping):
-            schedule = {}
+        upsert_keys = entry.get("upsert_keys")
+        if upsert_keys is None:
+            upsert_keys = metadata.get("upsert_keys")
+        parsed_upsert: tuple[str, ...] | None = None
+        if isinstance(upsert_keys, Sequence) and not isinstance(upsert_keys, (str, bytes, bytearray)):
+            parsed_upsert = tuple(str(key) for key in upsert_keys)
+            metadata.pop("upsert_keys", None)
 
-        filter_cfg = entry.get("filter", {}) or {}
-        filter_expression: str | None = None
-        if isinstance(filter_cfg, Mapping):
-            filter_expression = filter_cfg.get("expression")
+        description = entry.get("description") or metadata.get("description")
+        if isinstance(description, str):
+            metadata.pop("description", None)
+        else:
+            description = None
 
-        extra = {
-            key: value
-            for key, value in entry.items()
-            if key
-            not in {
-                "type",
-                "api",
-                "transform_rules",
-                "load",
-                "sample_input",
-                "inputs",
-                "pagination",
-                "schedule",
-                "filter",
-            }
-        }
-
-        return BlueprintSource(
-            pillar=pillar,
-            type=type_name,
-            api=api,
-            transform_rules=transform_rules,
-            load_table=table,
-            upsert_keys=upsert_keys,
-            sample_input=sample_input,
-            inputs=dict(inputs),
-            pagination=dict(pagination),
-            schedule=dict(schedule),
-            filter_expression=filter_expression,
-            extra=extra,
+        return BlueprintTable(
+            kind=kind,
+            type=table_type,
+            table_name=table_name,
+            source_kind=source_kind,
+            source_config=source_config,
+            source_endpoint=source_endpoint,
+            source_method=source_method,
+            source_parameters=source_parameters,
+            sample_path=sample_path,
+            sample_format=sample_format,
+            extractors=tuple(extractors),
+            transformations=transformations,
+            inputs=inputs,
+            upsert_keys=parsed_upsert,
+            description=description,
+            metadata=metadata,
         )
 
     def _resolve_rule_path(self, rule: str, base_dir: Path) -> Path:
@@ -340,5 +449,5 @@ class BlueprintRegistry:
             return str(path)
 
 
-__all__ = ["Blueprint", "BlueprintRegistry", "BlueprintSource"]
+__all__ = ["Blueprint", "BlueprintRegistry", "BlueprintTable"]
 
