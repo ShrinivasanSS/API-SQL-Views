@@ -1,102 +1,153 @@
-version: 1
+version: 2
 
 entity:
-  entityType: ISP
-  entityIdField: EntityID
+  - name: isp
+    type: ISP
+    identifier: EntityID
 
-defaults:
-  upsert:
-    metrics:
-      - EntityType
-      - EntityID
-      - EntityInstance
-      - MetricName
-    traces:
-      - TraceEntityType
-      - TraceEntityID
-      - TraceType
-      - TraceInstance
-    logs:
-      - LogEntityType
-      - LogEntityID
-      - LogType
-      - collection_time
-    events:
-      - EntityType
-      - EntityID
-      - EventType
-      - EventTime
-      - EventId
+    tables:
+      - kind: preset
+        type: metrics
+        table_name: isp_metrics
+        source:
+          kind: api
+          config:
+            path: /app/api/isp/tabulardetails/{monitor_id}
+            sample_input: sample_inputs/metrics/api_isp_tabular_details_15698000397185121.json
+        inputs:
+          metric_units:
+            packet_loss: "%"
+            latency: "ms"
+            mtu: "bytes"
+            jitter: "ms"
+            asnumber_count: "count"
+            hop_count: "count"
+        extractors:
+          - extractor: jsonKeyValueExtractor
+            config:
+              path: $.data.tabularData.map_data.data[0]
+              ignore_keys:
+                - location_id
+                - location_name
+                - collection_time
+                - down
+              mapping:
+                MetricName: key
+                CurrentValue: value
+                EntityType: context.params.entity_type
+                EntityID: context.params.entity_id
+                MetricUnit: context.params.metric_units.{key}
+          - extractor: jsonObjectExtractor
+            config:
+              path: $.data.tabularData.map_data.data[0]
+              mapping:
+                EntityInstance: location_id
+                CollectionTime: collection_time
+            merge_strategy: broadcast
+        metadata:
+          description: "Metric key/value pairs derived from ISP tabular details."
+          upsert_keys:
+            - EntityType
+            - EntityID
+            - EntityInstance
+            - MetricName
 
-metrics:
-  - type: isp_tabular
-    api: /app/api/isp/tabulardetails/{monitor_id}
-    sample_input: sample_inputs/metrics/api_isp_tabular_details_15698000397185121.json
-    transform_rules:
-      - sample_transformation_rules/ISP/isp_tabulardata_metric_transformation.rules
-    inputs:
-      metric_units:
-        packet_loss: "%"
-        latency: "ms"
-        mtu: "bytes"
-        jitter: "ms"
-        asnumber_count: "count"
-        hop_count: "count"
-    load:
-      table: metrics
+      - kind: preset
+        type: traces
+        table_name: isp_traces
+        source:
+          kind: api
+          config:
+            path: /api/isp/traceroute/{monitor_id}
+            sample_input: sample_inputs/traces/api_isp_traceroute_15698000397185121.json
+        transformations:
+          - sample_transformation_rules/ISP/isp_trace_transformation.rules
+        metadata:
+          description: "Traceroute spans extracted via legacy transformation rules."
 
-traces:
-  - type: traceroute
-    api: /api/isp/traceroute/{monitor_id}
-    sample_input: sample_inputs/traces/api_isp_traceroute_15698000397185121.json
-    transform_rules:
-      - sample_transformation_rules/ISP/isp_trace_transformation.rules
-    load:
-      table: traces
+      - kind: preset
+        type: logs
+        table_name: isp_logs
+        source:
+          kind: api
+          config:
+            path: /api/reports/log_reports/{monitor_id}?date={today}
+            sample_input: sample_inputs/logs/api_isp_15698000397185121_logreport.json
+        inputs:
+          log_type: LogReport
+        extractors:
+          - extractor: jsonArrayExtractor
+            config:
+              path: $.data.report
+              mapping:
+                LogType: context.params.log_type
+                LogEntityType: context.params.entity_type
+                LogEntityID: context.params.entity_id
+                collection_time: collection_time
+                location_id: location_id
+                availability: availability
+                latency: latency
+                jitter: jitter
+                packet_loss: packet_loss
+                reason: reason
+                Raw: $
+        metadata:
+          description: "Availability log entries expanded from log reports."
 
-logs:
-  - type: availability_log
-    api: /api/reports/log_reports/{monitor_id}?date={today}
-    sample_input: sample_inputs/logs/api_isp_15698000397185121_logreport.json
-    transform_rules:
-      - sample_transformation_rules/ISP/isp_logreport_transformation.rules
-    load:
-      table: logs
+      - kind: preset
+        type: events
+        table_name: isp_events
+        source:
+          kind: api
+          config:
+            path: /api/applog/search/{start_date}%20{start_time}/{end_date}%20{end_time}/{range}/desc
+            query_param: q
+            sample_input: sample_inputs/events/api_isp_infrastructure_events.json
+            pagination:
+              page_size: 100
+              start_index: 1
+              max_pages: 1
+            schedule:
+              lookback: "24h"
+              align_to: "now"
+        inputs:
+          event_type: Infrastructure
+          event_source: ISP
+        extractors:
+          - extractor: jsonArrayExtractor
+            config:
+              path: $.data.docs
+              mapping:
+                MonitorId: monitorid
+                EventType: eventtype
+                Severity: severity
+                Source: source
+                Message: message
+                ReceivedTime: _zlf__zl_received_time
+                Timestamp: _zl_timestamp
+                Raw: $
+        transformations:
+          - sample_transformation_rules/eventlogs_transformation.rules
+        metadata:
+          description: "Infrastructure events derived from applog search results."
+          upsert_keys:
+            - EntityType
+            - EntityID
+            - EventId
 
-events:
-  - type: infrastructure
-    filter:
-      expression: 'logtype="Infrastructure Events" and source="ISP"'
-    api:
-      path: /api/applog/search/{start_date}%20{start_time}/{end_date}%20{end_time}/{range}/desc?
-      query_param: q
-    sample_input: sample_inputs/events/api_isp_infrastructure_events.json
-    pagination:
-      page_size: 100
-      start_index: 1
-      max_pages: 1
-    schedule:
-      lookback: "24h"
-      align_to: "now"
-    transform_rules:
-      - sample_transformation_rules/eventlogs_transformation.rules
-    inputs:
-      event_type: Infrastructure
-      event_source: ISP
-    load:
-      table: events
-      upsert_keys:
-        - EntityType
-        - EntityID
-        - EventId
+    views:
+      - name: isp_latest_health
+        description: "Example: join Entities with latest isp_metrics"
+        queries:
+          - |
+            SELECT e.EntityID, e.EntityName, m.MetricName, m.CurrentValue
+            FROM Entities e
+            JOIN isp_metrics m ON m.EntityID = e.EntityID
+            WHERE e.EntityType = :entity_type
+            ORDER BY m.EntityID, m.MetricName
+        params:
+          entity_type: ISP
 
-views:
-  - name: isp_latest_health
-    sql_template: |
-      SELECT e.EntityID, e.EntityName, m.MetricName, m.CurrentValue
-      FROM Entities e
-      JOIN Metrics m ON m.EntityID = e.EntityID
-      WHERE e.EntityType = :entity_type
-      ORDER BY m.EntityID, m.MetricName
-    params:
-      entity_type: ISP
+    metadata:
+      tags: [observability, isp]
+      owner: ops-team
