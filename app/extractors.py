@@ -157,6 +157,52 @@ def _rows_from_mapping(
     return pd.DataFrame(rows)
 
 
+def _resolve_filter_operand(
+    operand: Any,
+    *,
+    row: Mapping[str, Any],
+    root: Any,
+    context: Mapping[str, Any] | None,
+) -> Any:
+    if isinstance(operand, str):
+        value = operand.strip()
+        if not value:
+            return value
+        if value.startswith("context."):
+            return _lookup_context(context, value[len("context.") :])
+        if value.startswith("$"):
+            return resolve_json_path(row, value)
+    return operand
+
+
+def _matches_filters(
+    row: Mapping[str, Any],
+    filters: Sequence[Mapping[str, Any]],
+    *,
+    root: Any,
+    context: Mapping[str, Any] | None,
+) -> bool:
+    for flt in filters:
+        path = str(flt.get("path") or flt.get("field") or "").strip()
+        if not path:
+            continue
+        actual = resolve_json_path(row, path) if path else None
+        if "equals" in flt:
+            expected = _resolve_filter_operand(
+                flt.get("equals"), row=row, root=root, context=context
+            )
+            if actual != expected:
+                return False
+        if "in" in flt:
+            options = flt.get("in")
+            if isinstance(options, Sequence) and not isinstance(
+                options, (str, bytes, bytearray)
+            ):
+                if actual not in options:
+                    return False
+    return True
+
+
 def run_json_array_extractor(
     data: Any, config: Mapping[str, Any], *, context: Mapping[str, Any] | None = None
 ) -> pd.DataFrame:
@@ -172,6 +218,23 @@ def run_json_array_extractor(
         target_iterable = [item for item in target if isinstance(item, Mapping)]
     else:
         return pd.DataFrame()
+
+    filters_cfg: List[Mapping[str, Any]] = []
+    if isinstance(config, Mapping):
+        raw_filters = config.get("filters")
+        if isinstance(raw_filters, Mapping):
+            filters_cfg = [raw_filters]
+        elif isinstance(raw_filters, Sequence) and not isinstance(
+            raw_filters, (str, bytes, bytearray)
+        ):
+            filters_cfg = [f for f in raw_filters if isinstance(f, Mapping)]
+
+    if filters_cfg:
+        filtered_items: List[Mapping[str, Any]] = []
+        for item in target_iterable:
+            if _matches_filters(item, filters_cfg, root=data, context=context):
+                filtered_items.append(item)
+        target_iterable = filtered_items
 
     mapping = config.get("mapping", {}) if isinstance(config, Mapping) else {}
     if not isinstance(mapping, Mapping):

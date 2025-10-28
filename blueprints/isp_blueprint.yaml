@@ -7,21 +7,62 @@ entity:
 
     tables:
       - kind: preset
+        type: entitylist
+        table_name: entities
+        source:
+          kind: api
+          endpoint: /app/api/entities/current
+          parameters:
+            entity_type:
+              source: params.entity_filter
+              description: Entity filter applied to the inventory response
+              required: true
+        sample:
+          path: sample_inputs/entities/api_current_status.json
+          format: json
+        inputs:
+          entity_filter: ISP
+        extractors:
+          - extractor: jsonArrayExtractor
+            config:
+              path: $.data.monitors
+              filters:
+                - path: monitor_type
+                  equals: context.params.entity_filter
+              mapping:
+                EntityType: monitor_type
+                EntityID: monitor_id
+                EntityName: name
+                EntityCurrentStatus: status
+                EntityTags: tags
+        metadata:
+          description: "Seed the entities table with ISP monitors from the inventory API."
+          upsert_keys:
+            - EntityType
+            - EntityID
+
+      - kind: preset
         type: metrics
         table_name: isp_metrics
         source:
           kind: api
-          config:
-            path: /app/api/isp/tabulardetails/{monitor_id}
-            sample_input: sample_inputs/metrics/api_isp_tabular_details_15698000397185121.json
+          endpoint: /app/api/isp/tabulardetails/{monitor_id}
+          parameters:
+            monitor_id:
+              source: entity.EntityID
+              description: Monitor identifier for the ISP entity
+              required: true
+        sample:
+          path: sample_inputs/metrics/api_isp_tabular_details_15698000397185121.json
+          format: json
         inputs:
           metric_units:
             packet_loss: "%"
-            latency: "ms"
-            mtu: "bytes"
-            jitter: "ms"
-            asnumber_count: "count"
-            hop_count: "count"
+            latency: ms
+            mtu: bytes
+            jitter: ms
+            asnumber_count: count
+            hop_count: count
         extractors:
           - extractor: jsonKeyValueExtractor
             config:
@@ -57,9 +98,15 @@ entity:
         table_name: isp_traces
         source:
           kind: api
-          config:
-            path: /api/isp/traceroute/{monitor_id}
-            sample_input: sample_inputs/traces/api_isp_traceroute_15698000397185121.json
+          endpoint: /api/isp/traceroute/{monitor_id}
+          parameters:
+            monitor_id:
+              source: entity.EntityID
+              description: Monitor identifier for traceroute spans
+              required: true
+        sample:
+          path: sample_inputs/traces/api_isp_traceroute_15698000397185121.json
+          format: json
         transformations:
           - sample_transformation_rules/ISP/isp_trace_transformation.rules
         metadata:
@@ -70,11 +117,21 @@ entity:
         table_name: isp_logs
         source:
           kind: api
-          config:
-            path: /api/reports/log_reports/{monitor_id}?date={today}
-            sample_input: sample_inputs/logs/api_isp_15698000397185121_logreport.json
+          endpoint: /api/reports/log_reports/{monitor_id}
+          parameters:
+            monitor_id:
+              source: entity.EntityID
+              required: true
+              description: Monitor identifier for log reports
+            date:
+              source: params.report_date
+              description: ISO date for the log report window
+        sample:
+          path: sample_inputs/logs/api_isp_15698000397185121_logreport.json
+          format: json
         inputs:
           log_type: LogReport
+          report_date: 2023-08-01
         extractors:
           - extractor: jsonArrayExtractor
             config:
@@ -99,20 +156,46 @@ entity:
         table_name: isp_events
         source:
           kind: api
+          endpoint: /api/applog/search/{start_date}%20{start_time}/{end_date}%20{end_time}/{range}/desc
           config:
-            path: /api/applog/search/{start_date}%20{start_time}/{end_date}%20{end_time}/{range}/desc
             query_param: q
-            sample_input: sample_inputs/events/api_isp_infrastructure_events.json
             pagination:
               page_size: 100
               start_index: 1
               max_pages: 1
             schedule:
-              lookback: "24h"
-              align_to: "now"
+              lookback: 24h
+              align_to: now
+          parameters:
+            start_date:
+              source: params.start_date
+              description: Event search start date (YYYY-MM-DD)
+            start_time:
+              source: params.start_time
+              description: Event search start time
+            end_date:
+              source: params.end_date
+              description: Event search end date (YYYY-MM-DD)
+            end_time:
+              source: params.end_time
+              description: Event search end time
+            range:
+              source: params.range
+              description: Rolling window for event search
+            monitor_id:
+              source: entity.EntityID
+              description: Monitor identifier for context
+        sample:
+          path: sample_inputs/events/api_isp_infrastructure_events.json
+          format: json
         inputs:
           event_type: Infrastructure
           event_source: ISP
+          start_date: 2023-08-01
+          start_time: 00:00
+          end_date: 2023-08-02
+          end_time: 00:00
+          range: 24h
         extractors:
           - extractor: jsonArrayExtractor
             config:

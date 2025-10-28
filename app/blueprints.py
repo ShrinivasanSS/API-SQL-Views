@@ -21,7 +21,11 @@ class BlueprintTable:
     table_name: str
     source_kind: str
     source_config: Dict[str, Any]
-    sample_input: Path | None
+    source_endpoint: str | None
+    source_method: str | None
+    source_parameters: Dict[str, Any]
+    sample_path: Path | None
+    sample_format: str | None
     extractors: tuple[ExtractorDefinition, ...]
     transformations: tuple[Path, ...]
     inputs: Dict[str, Any]
@@ -40,10 +44,10 @@ class BlueprintTable:
             except ValueError:
                 return str(path)
 
-        return {
+        metadata: Dict[str, Any] = {
             "name": f"{entity_type}:{self.type}:{self.table_name}",
             "title": f"{entity_type} {self.type} · {self.table_name}",
-            "input": _relative(self.sample_input),
+            "input": _relative(self.sample_path),
             "rule": _relative(self.transformations[0]) if self.transformations else "",
             "table_name": self.table_name,
             "table_type": self.kind,
@@ -53,6 +57,15 @@ class BlueprintTable:
             "load_mode": "upsert" if self.upsert_keys else "replace",
             "upsert_keys": list(self.upsert_keys) if self.upsert_keys else None,
         }
+        metadata["source"] = {
+            "kind": self.source_kind,
+            "endpoint": self.source_endpoint,
+            "method": self.source_method,
+            "parameters": self.source_parameters,
+        }
+        if self.sample_format:
+            metadata["sample_format"] = self.sample_format
+        return metadata
 
 
 @dataclass(slots=True)
@@ -113,9 +126,18 @@ class BlueprintRegistry:
                 self._table_summary(table, entity_type=entity_type)
                 for table in blueprint.iter_tables()
             ]
+            sources = [
+                {
+                    "pillar": table["pillar"],
+                    "table_name": table["table_name"],
+                    "table_type": table["table_type"],
+                }
+                for table in tables
+            ]
             summary[entity_type] = {
                 "path": self._relative(path),
                 "tables": tables,
+                "sources": sources,
                 "views": blueprint.views,
                 "metadata": blueprint.metadata,
             }
@@ -150,7 +172,7 @@ class BlueprintRegistry:
             if blueprint is None:
                 continue
             for table in blueprint.iter_tables():
-                if not table.transformations or table.sample_input is None:
+                if not table.transformations or table.sample_path is None:
                     continue
                 metadata.append(table.to_metadata(self.project_root, entity_type=entity_type))
         return metadata
@@ -172,17 +194,31 @@ class BlueprintRegistry:
     def _table_summary(
         self, table: BlueprintTable, *, entity_type: str
     ) -> Dict[str, Any]:
-        sample_input = self._relative(table.sample_input) if table.sample_input else ""
+        sample_path = self._relative(table.sample_path) if table.sample_path else ""
+        sample: Dict[str, Any] | None = None
+        if sample_path or table.sample_format:
+            sample = {
+                "path": sample_path,
+                "format": table.sample_format,
+            }
+
+        source = {
+            "kind": table.source_kind,
+            "endpoint": table.source_endpoint,
+            "method": table.source_method,
+            "parameters": table.source_parameters,
+            "config": table.source_config,
+        }
+
         return {
             "id": f"{entity_type}:{table.type}:{table.table_name}",
-            "kind": table.kind,
-            "type": table.type,
+            "pillar": table.kind,
+            "table_type": table.type,
             "table_name": table.table_name,
-            "sample_input": sample_input,
-            "source": {
-                "kind": table.source_kind,
-                "config": table.source_config,
-            },
+            "description": table.description,
+            "sample": sample,
+            "sample_input": sample_path,
+            "source": source,
             "extractors": [
                 {
                     "name": extractor.name,
@@ -194,7 +230,6 @@ class BlueprintRegistry:
             ],
             "transformations": [self._relative(path) for path in table.transformations],
             "upsert_keys": list(table.upsert_keys or ()),
-            "description": table.description,
             "inputs": table.inputs,
             "metadata": table.metadata,
         }
@@ -268,14 +303,47 @@ class BlueprintRegistry:
         if not isinstance(source_section, Mapping):
             source_section = {}
         source_kind = str(source_section.get("kind") or "api").strip() or "api"
-        source_config = source_section.get("config", {}) or {}
-        if not isinstance(source_config, Mapping):
-            source_config = {}
-        source_config = dict(source_config)
+        raw_config = source_section.get("config", {}) or {}
+        if not isinstance(raw_config, Mapping):
+            raw_config = {}
+        source_config = dict(raw_config)
 
-        sample_input = self._resolve_optional_path(
-            source_config.get("sample_input"), base_dir
-        )
+        raw_endpoint = source_section.get("endpoint") or source_config.pop("endpoint", None)
+        if raw_endpoint is None and source_kind == "api":
+            raw_endpoint = source_config.pop("path", None)
+        source_endpoint = str(raw_endpoint).strip() if raw_endpoint else None
+
+        raw_method = source_section.get("method") or source_config.pop("method", None)
+        source_method = str(raw_method).upper() if raw_method else ("GET" if source_kind == "api" else None)
+
+        parameters_section = source_section.get("parameters") or {}
+        source_parameters: Dict[str, Any] = {}
+        if isinstance(parameters_section, Mapping):
+            for name, spec in parameters_section.items():
+                key = str(name)
+                if isinstance(spec, Mapping):
+                    source_parameters[key] = dict(spec)
+                else:
+                    source_parameters[key] = {"value": spec}
+
+        sample_section = entry.get("sample") or {}
+        sample_path: Path | None = None
+        sample_format: str | None = None
+        if isinstance(sample_section, Mapping):
+            sample_path = self._resolve_optional_path(sample_section.get("path"), base_dir)
+            fmt = sample_section.get("format")
+            sample_format = str(fmt) if isinstance(fmt, str) and fmt.strip() else None
+
+        if sample_path is None:
+            legacy_sample = (
+                source_section.get("sample_input")
+                or raw_config.get("sample_input")
+                or source_config.get("sample_input")
+                or entry.get("sample_input")
+            )
+            sample_path = self._resolve_optional_path(legacy_sample, base_dir)
+
+        source_config.pop("sample_input", None)
 
         extractors_config = entry.get("extractors") or []
         extractors: List[ExtractorDefinition] = []
@@ -334,7 +402,11 @@ class BlueprintRegistry:
             table_name=table_name,
             source_kind=source_kind,
             source_config=source_config,
-            sample_input=sample_input,
+            source_endpoint=source_endpoint,
+            source_method=source_method,
+            source_parameters=source_parameters,
+            sample_path=sample_path,
+            sample_format=sample_format,
             extractors=tuple(extractors),
             transformations=transformations,
             inputs=inputs,

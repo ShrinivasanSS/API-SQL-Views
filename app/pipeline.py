@@ -5,11 +5,84 @@ from __future__ import annotations
 import io
 import sqlite3
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Mapping, Sequence
 
 import pandas as pd
 
 import json
+
+
+def _lookup_path(data: Any, path: str) -> Any:
+    """Resolve a dotted path against nested mappings/sequences."""
+
+    if not path:
+        return None
+
+    current: Any = data
+    tokens = [part for part in str(path).split(".") if part]
+    for token in tokens:
+        if isinstance(current, Mapping):
+            current = current.get(token)
+        elif isinstance(current, Sequence) and not isinstance(current, (str, bytes, bytearray)) and token.isdigit():
+            index = int(token)
+            if index < 0 or index >= len(current):
+                return None
+            current = current[index]
+        else:
+            return None
+        if current is None:
+            return None
+    return current
+
+
+def _resolve_parameter_source(
+    spec: Any, *, params: Mapping[str, Any], entity: Mapping[str, Any]
+) -> Any:
+    """Resolve a parameter binding to a concrete value."""
+
+    if isinstance(spec, str):
+        expression = spec.strip()
+        if not expression:
+            return None
+        if expression.startswith("entity."):
+            return _lookup_path(entity, expression[len("entity.") :])
+        if expression.startswith("params."):
+            return _lookup_path(params, expression[len("params.") :])
+        if expression.startswith("context."):
+            context = {"params": params, "entity": entity}
+            return _lookup_path(context, expression[len("context.") :])
+        return expression
+
+    return spec
+
+
+def _resolve_parameter_bindings(
+    definitions: Mapping[str, Any],
+    *,
+    params: Mapping[str, Any],
+    entity: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Evaluate parameter definitions from the blueprint source section."""
+
+    resolved: Dict[str, Any] = {}
+    for name, raw_spec in definitions.items():
+        value: Any = None
+        if isinstance(raw_spec, Mapping):
+            if "value" in raw_spec:
+                value = raw_spec.get("value")
+            elif "source" in raw_spec:
+                value = _resolve_parameter_source(
+                    raw_spec.get("source"), params=params, entity=entity
+                )
+            if value is None and "default" in raw_spec:
+                value = raw_spec.get("default")
+        else:
+            value = raw_spec
+
+        if value is not None:
+            resolved[str(name)] = value
+
+    return resolved
 
 from .config import AppConfig, PipelineRule
 from .extractors import apply_extractors
@@ -142,7 +215,140 @@ def run_full_pipeline(config: AppConfig) -> List[Dict[str, Any]]:
     results = []
     for rule in config.pipeline_rules:
         results.append(run_pipeline_rule(rule, config.database_path))
+    results.extend(run_blueprint_entitylists(config))
     results.extend(run_blueprint_pipeline(config))
+    return results
+
+
+def run_blueprint_entitylists(config: AppConfig) -> List[Dict[str, Any]]:
+    """Execute blueprint tables responsible for maintaining entity lists."""
+
+    registry = config.blueprint_registry
+    if registry.is_empty():
+        return []
+
+    results: List[Dict[str, Any]] = []
+    project_root = registry.project_root
+
+    for entity_type, blueprint in registry._mapping.items():
+        blueprint_obj = registry.get(entity_type)
+        if blueprint_obj is None:
+            continue
+
+        for table in blueprint_obj.iter_tables():
+            if table.type.lower() != "entitylist":
+                continue
+            if table.sample_path is None:
+                continue
+
+            params: Dict[str, Any] = {**table.inputs}
+            params.setdefault("entity_type", entity_type)
+            entity_context = {"EntityType": entity_type}
+
+            resolved_params = _resolve_parameter_bindings(
+                table.source_parameters, params=params, entity=entity_context
+            )
+            params.update(resolved_params)
+
+            context_globals = {
+                "ENTITY_ROW": entity_context,
+                "BLUEPRINT_TABLE": {
+                    "kind": table.kind,
+                    "type": table.type,
+                    "table_name": table.table_name,
+                },
+                "BLUEPRINT_SOURCE": {
+                    "kind": table.source_kind,
+                    "endpoint": table.source_endpoint,
+                    "method": table.source_method,
+                    "config": table.source_config,
+                    "parameters": resolved_params,
+                    "parameter_specs": table.source_parameters,
+                },
+            }
+
+            upsert_keys = table.upsert_keys or blueprint_obj.default_upsert_keys(table.type)
+            load_mode = "upsert" if upsert_keys else "replace"
+
+            payload = json.loads(table.sample_path.read_text(encoding="utf-8"))
+            extractor_context = {
+                "params": params,
+                "entity": entity_context,
+                "table": {
+                    "kind": table.kind,
+                    "type": table.type,
+                    "table_name": table.table_name,
+                },
+            }
+
+            last_transform_path: Path | None = None
+            if table.extractors:
+                df_output = apply_extractors(
+                    payload, table.extractors, context=extractor_context
+                )
+            else:
+                if isinstance(payload, Mapping):
+                    df_output = pd.DataFrame([payload])
+                elif isinstance(payload, Sequence) and not isinstance(
+                    payload, (str, bytes, bytearray)
+                ):
+                    df_output = pd.DataFrame(list(payload))
+                else:
+                    df_output = pd.DataFrame([{"value": payload}])
+
+            if table.transformations:
+                for transform_path in table.transformations:
+                    last_transform_path = transform_path
+                    rule = PipelineRule(
+                        name=f"{table.type}:{table.table_name}:{transform_path.stem}",
+                        title=f"{entity_type} {table.type} · {table.table_name}",
+                        input_path=table.sample_path,
+                        rule_path=transform_path,
+                        table_name=table.table_name,
+                        table_type=table.kind,
+                        description=table.description
+                        or f"Blueprint table {table.table_name}",
+                        input_params=dict(params),
+                        load_mode=load_mode,
+                        upsert_keys=upsert_keys,
+                    )
+                    df_output = execute_rule(
+                        df_output, rule, extra_globals=context_globals
+                    )
+
+            load_dataframe_to_sqlite(
+                df_output,
+                table_name=table.table_name,
+                database_path=config.database_path,
+                load_mode=load_mode,
+                upsert_keys=upsert_keys,
+            )
+
+            csv_buffer = io.StringIO()
+            df_output.to_csv(csv_buffer, index=False)
+
+            rule_metadata = table.to_metadata(project_root, entity_type=entity_type)
+            if last_transform_path is not None:
+                rule_metadata["rule"] = str(
+                    last_transform_path.relative_to(project_root)
+                )
+            else:
+                extractor_path = project_root / "app" / "extractors.py"
+                rule_metadata["rule"] = str(extractor_path.relative_to(project_root))
+            rule_metadata["input_params"] = dict(params)
+            rule_metadata["load_mode"] = load_mode
+            rule_metadata["upsert_keys"] = list(upsert_keys) if upsert_keys else None
+            rule_metadata.setdefault("source", {})["resolved_parameters"] = resolved_params
+
+            results.append(
+                {
+                    "rule": rule_metadata,
+                    "rowcount": len(df_output.index),
+                    "columns": list(df_output.columns),
+                    "preview_csv": csv_buffer.getvalue(),
+                }
+            )
+
     return results
 
 
@@ -177,7 +383,9 @@ def run_blueprint_pipeline(config: AppConfig) -> List[Dict[str, Any]]:
         entity_name = entity.get("EntityName", "")
 
         for table in blueprint.iter_tables():
-            if table.sample_input is None:
+            if table.type.lower() == "entitylist":
+                continue
+            if table.sample_path is None:
                 continue
 
             params = {**table.inputs}
@@ -188,6 +396,11 @@ def run_blueprint_pipeline(config: AppConfig) -> List[Dict[str, Any]]:
             params.setdefault("blueprint_table_type", table.type)
             params.setdefault("blueprint_table_name", table.table_name)
 
+            resolved_params = _resolve_parameter_bindings(
+                table.source_parameters, params=params, entity=entity
+            )
+            params.update(resolved_params)
+
             context_globals = {
                 "ENTITY_ROW": entity,
                 "BLUEPRINT_TABLE": {
@@ -195,15 +408,17 @@ def run_blueprint_pipeline(config: AppConfig) -> List[Dict[str, Any]]:
                     "type": table.type,
                     "table_name": table.table_name,
                     "source_kind": table.source_kind,
+                    "source_endpoint": table.source_endpoint,
+                    "source_method": table.source_method,
                     "source_config": table.source_config,
                 },
                 "BLUEPRINT_SOURCE": {
-                    "pillar": table.type,
-                    "type": table.type,
-                    "api": table.source_config.get("path"),
-                    "pagination": table.source_config.get("pagination"),
-                    "schedule": table.source_config.get("schedule"),
-                    "filter_expression": table.source_config.get("filter"),
+                    "kind": table.source_kind,
+                    "endpoint": table.source_endpoint,
+                    "method": table.source_method,
+                    "config": table.source_config,
+                    "parameters": resolved_params,
+                    "parameter_specs": table.source_parameters,
                 },
             }
 
@@ -211,7 +426,7 @@ def run_blueprint_pipeline(config: AppConfig) -> List[Dict[str, Any]]:
             load_mode = "upsert" if upsert_keys else "replace"
 
             if table.extractors:
-                payload = json.loads(table.sample_input.read_text(encoding="utf-8"))
+                payload = json.loads(table.sample_path.read_text(encoding="utf-8"))
                 extractor_context = {
                     "params": params,
                     "entity": entity,
@@ -230,7 +445,7 @@ def run_blueprint_pipeline(config: AppConfig) -> List[Dict[str, Any]]:
                         rule = PipelineRule(
                             name=f"{table.type}:{table.table_name}:{entity_id}:{transform_path.stem}",
                             title=f"{entity_type} {table.type} · {table.table_name}",
-                            input_path=table.sample_input,
+                            input_path=table.sample_path,
                             rule_path=transform_path,
                             table_name=table.table_name,
                             table_type=table.kind,
@@ -263,6 +478,9 @@ def run_blueprint_pipeline(config: AppConfig) -> List[Dict[str, Any]]:
                 rule_metadata["upsert_keys"] = (
                     list(upsert_keys) if upsert_keys else None
                 )
+                rule_metadata.setdefault("source", {})["resolved_parameters"] = (
+                    resolved_params
+                )
 
                 results.append(
                     {
@@ -281,7 +499,7 @@ def run_blueprint_pipeline(config: AppConfig) -> List[Dict[str, Any]]:
                 rule = PipelineRule(
                     name=f"{table.type}:{table.table_name}:{entity_id}:{transform_path.stem}",
                     title=f"{entity_type} {table.type} · {table.table_name}",
-                    input_path=table.sample_input,
+                    input_path=table.sample_path,
                     rule_path=transform_path,
                     table_name=table.table_name,
                     table_type=table.kind,
@@ -292,13 +510,17 @@ def run_blueprint_pipeline(config: AppConfig) -> List[Dict[str, Any]]:
                     upsert_keys=upsert_keys,
                 )
 
-                results.append(
-                    run_pipeline_rule(
-                        rule,
-                        config.database_path,
-                        extra_globals=context_globals,
-                    )
+                result = run_pipeline_rule(
+                    rule,
+                    config.database_path,
+                    extra_globals=context_globals,
                 )
+                result_rule = dict(result["rule"])
+                result_rule.setdefault("source", {})["resolved_parameters"] = (
+                    resolved_params
+                )
+                result["rule"] = result_rule
+                results.append(result)
 
     return results
 
