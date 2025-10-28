@@ -110,3 +110,173 @@ tables:
     indexes:
       - name: idx_traces_entity_span
         columns: [EntityType, EntityID, SpanID]
+ai_tasks:
+  - name: findEntities
+    title: Find Entities
+    description: Locate entities that match a loose search query.
+    instructions: |
+      You write SQLite-compatible SQL to answer data questions. Prefer indexed
+      lookups where available and return the identifying columns needed to join
+      with other tables. When searching entities, match against both EntityName
+      and EntityID fields using case-insensitive wildcards.
+    inputs:
+      - name: query
+        label: Search phrase
+        placeholder: e.g. edge router
+        description: Free-form text to match against entity names and IDs.
+    steps:
+      - title: Lookup entities
+        sql: |
+          SELECT EntityID,
+                 EntityName,
+                 EntityType,
+                 EntityCurrentStatus,
+                 EntityTags
+            FROM entities
+           WHERE lower(EntityName) LIKE '%' || lower(:query) || '%'
+              OR lower(EntityID) LIKE '%' || lower(:query) || '%'
+           ORDER BY EntityName
+  - name: fetchEvents
+    title: Fetch Events
+    description: Retrieve the recent events associated with an entity.
+    instructions: |
+      You help SREs review the latest events for an entity. Produce SQL that
+      filters by EntityID and orders records chronologically so analysts can
+      scan what happened most recently.
+    inputs:
+      - name: entity_id
+        label: Entity ID
+        placeholder: e.g. router-12
+        description: Identifier of the entity to inspect.
+      - name: limit
+        label: Row limit
+        placeholder: 25
+        description: Maximum number of rows to return.
+        default: 25
+    steps:
+      - title: Recent events
+        sql: |
+          SELECT EventTime,
+                 Severity,
+                 EventType,
+                 Message,
+                 Source
+            FROM events
+           WHERE EntityID = :entity_id
+           ORDER BY datetime(EventTime) DESC
+           LIMIT COALESCE(NULLIF(:limit, ''), 25)
+  - name: fetchLogs
+    title: Fetch Logs
+    description: Surface the latest raw log statements for an entity.
+    instructions: |
+      Extract raw log lines for the provided entity. Use descending collection
+      time so the newest activity appears first.
+    inputs:
+      - name: entity_id
+        label: Entity ID
+        placeholder: e.g. router-12
+        description: Identifier of the entity to inspect.
+      - name: limit
+        label: Row limit
+        placeholder: 50
+        description: Maximum number of rows to return.
+        default: 50
+    steps:
+      - title: Latest logs
+        sql: |
+          SELECT collection_time,
+                 status,
+                 details
+            FROM logs
+           WHERE entity_id = :entity_id
+           ORDER BY datetime(collection_time) DESC
+           LIMIT COALESCE(NULLIF(:limit, ''), 50)
+  - name: fetchMetrics
+    title: Fetch Metrics
+    description: Collect metric samples tied to an entity across dimensions.
+    instructions: |
+      Retrieve metric observations for an entity. Group by metric name and sort
+      by the newest sample to keep related readings together.
+    inputs:
+      - name: entity_id
+        label: Entity ID
+        placeholder: e.g. router-12
+        description: Identifier of the entity to inspect.
+      - name: limit
+        label: Row limit
+        placeholder: 100
+        description: Maximum number of metric rows to return.
+        default: 100
+    steps:
+      - title: Metric samples
+        sql: |
+          SELECT MetricName,
+                 MetricValue,
+                 MetricUnit,
+                 TimeWindow,
+                 EntityInstance
+            FROM metrics
+           WHERE EntityID = :entity_id
+           ORDER BY MetricName ASC, datetime(TimeWindow) DESC
+           LIMIT COALESCE(NULLIF(:limit, ''), 100)
+  - name: fetchTraces
+    title: Fetch Traces
+    description: Inspect traces and hop-by-hop timings for an entity.
+    instructions: |
+      Retrieve spans recorded for the entity, ordered by hop to reflect the
+      observed path. Include duration information so analysts can quickly spot
+      slow segments.
+    inputs:
+      - name: entity_id
+        label: Entity ID
+        placeholder: e.g. router-12
+        description: Identifier of the entity to inspect.
+      - name: limit
+        label: Row limit
+        placeholder: 50
+        description: Maximum number of span rows to return.
+        default: 50
+    steps:
+      - title: Trace spans
+        sql: |
+          SELECT SpanID,
+                 ParentSpanID,
+                 Hop,
+                 Target,
+                 DurationMs
+            FROM traces
+           WHERE EntityID = :entity_id
+           ORDER BY Hop ASC
+           LIMIT COALESCE(NULLIF(:limit, ''), 50)
+ai_workflows:
+  - name: entity_health_check
+    title: Entity Health Check
+    description: Correlate events, metrics, logs, and traces for a single entity.
+    instructions: |
+      You are an expert observability analyst. Use the available tools to build
+      a concise situation report for the requested entity. Always call
+      {fetchEvents}, {fetchMetrics}, {fetchLogs}, and {fetchTraces} using the
+      supplied entity identifier. Summarise the combined evidence, highlighting
+      high severity events, anomalous metric readings, or gaps in telemetry.
+    inputs:
+      - name: entity_id
+        label: Entity ID
+        placeholder: e.g. router-12
+        description: Identifier of the entity to review.
+    steps:
+      - task: fetchEvents
+        input_map:
+          entity_id: "{entity_id}"
+          limit: "20"
+      - task: fetchMetrics
+        input_map:
+          entity_id: "{entity_id}"
+          limit: "50"
+      - task: fetchLogs
+        input_map:
+          entity_id: "{entity_id}"
+          limit: "50"
+      - task: fetchTraces
+        input_map:
+          entity_id: "{entity_id}"
+          limit: "50"

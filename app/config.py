@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Mapping
 
 from dotenv import load_dotenv
 import os
+import yaml
 
 from .blueprints import BlueprintRegistry
 
@@ -54,6 +55,92 @@ class PipelineRule:
 
 
 @dataclass(slots=True)
+class TaskInputField:
+    """Describe a user-editable input passed to an AI task."""
+
+    name: str
+    label: str
+    description: str | None = None
+    placeholder: str | None = None
+    default: str | None = None
+
+    def to_metadata(self) -> Dict[str, Any]:
+        return {
+            "name": self.name,
+            "label": self.label,
+            "description": self.description,
+            "placeholder": self.placeholder,
+            "default": self.default,
+        }
+
+
+@dataclass(slots=True)
+class TaskStep:
+    """Single SQL step executed as part of a task."""
+
+    title: str
+    sql: str
+
+    def to_metadata(self) -> Dict[str, Any]:
+        return {"title": self.title, "sql": self.sql}
+
+
+@dataclass(slots=True)
+class AITaskDefinition:
+    """Runtime representation of a configured AI task."""
+
+    name: str
+    title: str
+    description: str
+    instructions: str
+    inputs: tuple[TaskInputField, ...]
+    steps: tuple[TaskStep, ...]
+
+    def to_metadata(self) -> Dict[str, Any]:
+        return {
+            "name": self.name,
+            "title": self.title,
+            "description": self.description,
+            "instructions": self.instructions,
+            "inputs": [field.to_metadata() for field in self.inputs],
+            "steps": [step.to_metadata() for step in self.steps],
+        }
+
+
+@dataclass(slots=True)
+class WorkflowStep:
+    """Invocation of an AI task inside a workflow."""
+
+    task: str
+    input_map: Dict[str, str]
+
+    def to_metadata(self) -> Dict[str, Any]:
+        return {"task": self.task, "input_map": dict(self.input_map)}
+
+
+@dataclass(slots=True)
+class AIWorkflowDefinition:
+    """Runtime representation of an AI workflow that chains tasks."""
+
+    name: str
+    title: str
+    description: str
+    instructions: str
+    inputs: tuple[TaskInputField, ...]
+    steps: tuple[WorkflowStep, ...]
+
+    def to_metadata(self) -> Dict[str, Any]:
+        return {
+            "name": self.name,
+            "title": self.title,
+            "description": self.description,
+            "instructions": self.instructions,
+            "inputs": [field.to_metadata() for field in self.inputs],
+            "steps": [step.to_metadata() for step in self.steps],
+        }
+
+
+@dataclass(slots=True)
 class AzureOpenAIConfig:
     """Configuration required to access an Azure OpenAI deployment."""
 
@@ -86,6 +173,8 @@ class AppConfig:
     credentials: Dict[str, str]
     blueprint_registry: BlueprintRegistry
     azure_openai: AzureOpenAIConfig | None = None
+    ai_tasks: tuple[AITaskDefinition, ...] = field(default_factory=tuple)
+    ai_workflows: tuple[AIWorkflowDefinition, ...] = field(default_factory=tuple)
 
     @classmethod
     def load_from_env(cls) -> "AppConfig":
@@ -111,6 +200,8 @@ class AppConfig:
             project_root=PROJECT_ROOT,
         )
 
+        tasks, workflows = cls._load_ai_definitions()
+
         azure_openai = None
         endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
         api_key = os.getenv("AZURE_OPENAI_API_KEY")
@@ -134,6 +225,8 @@ class AppConfig:
             credentials=credentials,
             blueprint_registry=blueprints,
             azure_openai=azure_openai,
+            ai_tasks=tasks,
+            ai_workflows=workflows,
         )
 
     def as_flask_config(self) -> Dict[str, Any]:
@@ -148,6 +241,10 @@ class AppConfig:
         }
         if self.azure_openai:
             config["AZURE_OPENAI"] = self.azure_openai.as_dict()
+        if self.ai_tasks:
+            config["AI_TASKS"] = [task.to_metadata() for task in self.ai_tasks]
+        if self.ai_workflows:
+            config["AI_WORKFLOWS"] = [wf.to_metadata() for wf in self.ai_workflows]
         return config
 
     @staticmethod
@@ -171,5 +268,203 @@ class AppConfig:
             ),
         )
 
+    @staticmethod
+    def _load_ai_definitions() -> tuple[
+        tuple[AITaskDefinition, ...], tuple[AIWorkflowDefinition, ...]
+    ]:
+        seed_path = PROJECT_ROOT / "seed.yaml"
+        if not seed_path.exists():
+            return tuple(), tuple()
 
-__all__ = ["AppConfig", "AzureOpenAIConfig", "PipelineRule", "PROJECT_ROOT"]
+        try:
+            raw_seed = yaml.safe_load(seed_path.read_text(encoding="utf-8")) or {}
+        except yaml.YAMLError:
+            return tuple(), tuple()
+
+        if not isinstance(raw_seed, Mapping):
+            return tuple(), tuple()
+
+        tasks = AppConfig._parse_ai_tasks(raw_seed.get("ai_tasks"))
+        workflows = AppConfig._parse_ai_workflows(
+            raw_seed.get("ai_workflows"), tasks
+        )
+        return tasks, workflows
+
+    @staticmethod
+    def _parse_ai_tasks(data: Any) -> tuple[AITaskDefinition, ...]:
+        if not isinstance(data, list):
+            return tuple()
+
+        tasks: list[AITaskDefinition] = []
+        for entry in data:
+            if not isinstance(entry, Mapping):
+                continue
+            name = str(entry.get("name") or "").strip()
+            title = str(entry.get("title") or name or "").strip() or name
+            description = str(entry.get("description") or "").strip()
+            instructions = str(entry.get("instructions") or "").strip()
+            raw_inputs = entry.get("inputs")
+            raw_steps = entry.get("steps")
+            if not name or not isinstance(raw_inputs, list) or not isinstance(
+                raw_steps, list
+            ):
+                continue
+
+            inputs: list[TaskInputField] = []
+            for item in raw_inputs:
+                if not isinstance(item, Mapping):
+                    continue
+                input_name = str(item.get("name") or "").strip()
+                if not input_name:
+                    continue
+                label = str(item.get("label") or input_name).strip() or input_name
+                placeholder = (
+                    str(item.get("placeholder")).strip()
+                    if item.get("placeholder") is not None
+                    else None
+                )
+                description_value = (
+                    str(item.get("description")).strip()
+                    if item.get("description") is not None
+                    else None
+                )
+                default_value = (
+                    str(item.get("default")).strip()
+                    if item.get("default") is not None
+                    else None
+                )
+                inputs.append(
+                    TaskInputField(
+                        name=input_name,
+                        label=label,
+                        description=description_value or None,
+                        placeholder=placeholder or None,
+                        default=default_value or None,
+                    )
+                )
+
+            steps: list[TaskStep] = []
+            for step in raw_steps:
+                if not isinstance(step, Mapping):
+                    continue
+                title_value = str(step.get("title") or "Step").strip() or "Step"
+                sql_value = str(step.get("sql") or "").strip()
+                if not sql_value:
+                    continue
+                steps.append(TaskStep(title=title_value, sql=sql_value))
+
+            if not steps:
+                continue
+
+            tasks.append(
+                AITaskDefinition(
+                    name=name,
+                    title=title,
+                    description=description,
+                    instructions=instructions,
+                    inputs=tuple(inputs),
+                    steps=tuple(steps),
+                )
+            )
+
+        return tuple(tasks)
+
+    @staticmethod
+    def _parse_ai_workflows(
+        data: Any, tasks: tuple[AITaskDefinition, ...]
+    ) -> tuple[AIWorkflowDefinition, ...]:
+        if not isinstance(data, list):
+            return tuple()
+
+        task_names = {task.name for task in tasks}
+        workflows: list[AIWorkflowDefinition] = []
+        for entry in data:
+            if not isinstance(entry, Mapping):
+                continue
+            name = str(entry.get("name") or "").strip()
+            title = str(entry.get("title") or name or "").strip() or name
+            description = str(entry.get("description") or "").strip()
+            instructions = str(entry.get("instructions") or "").strip()
+            raw_inputs = entry.get("inputs")
+            raw_steps = entry.get("steps")
+            if not name or not isinstance(raw_steps, list):
+                continue
+
+            inputs: list[TaskInputField] = []
+            if isinstance(raw_inputs, list):
+                for item in raw_inputs:
+                    if not isinstance(item, Mapping):
+                        continue
+                    input_name = str(item.get("name") or "").strip()
+                    if not input_name:
+                        continue
+                    label = str(item.get("label") or input_name).strip() or input_name
+                    placeholder = (
+                        str(item.get("placeholder")).strip()
+                        if item.get("placeholder") is not None
+                        else None
+                    )
+                    description_value = (
+                        str(item.get("description")).strip()
+                        if item.get("description") is not None
+                        else None
+                    )
+                    default_value = (
+                        str(item.get("default")).strip()
+                        if item.get("default") is not None
+                        else None
+                    )
+                    inputs.append(
+                        TaskInputField(
+                            name=input_name,
+                            label=label,
+                            description=description_value or None,
+                            placeholder=placeholder or None,
+                            default=default_value or None,
+                        )
+                    )
+
+            steps: list[WorkflowStep] = []
+            for step in raw_steps:
+                if not isinstance(step, Mapping):
+                    continue
+                task_name = str(step.get("task") or "").strip()
+                if not task_name or task_name not in task_names:
+                    continue
+                input_map_raw = step.get("input_map")
+                input_map: Dict[str, str] = {}
+                if isinstance(input_map_raw, Mapping):
+                    for key, value in input_map_raw.items():
+                        if not key:
+                            continue
+                        input_map[str(key)] = str(value) if value is not None else ""
+                steps.append(WorkflowStep(task=task_name, input_map=input_map))
+
+            if not steps:
+                continue
+
+            workflows.append(
+                AIWorkflowDefinition(
+                    name=name,
+                    title=title,
+                    description=description,
+                    instructions=instructions,
+                    inputs=tuple(inputs),
+                    steps=tuple(steps),
+                )
+            )
+
+        return tuple(workflows)
+
+
+__all__ = [
+    "AITaskDefinition",
+    "AIWorkflowDefinition",
+    "AppConfig",
+    "AzureOpenAIConfig",
+    "PipelineRule",
+    "PROJECT_ROOT",
+    "TaskInputField",
+    "TaskStep",
+    "WorkflowStep",
+]

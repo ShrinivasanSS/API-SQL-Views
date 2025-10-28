@@ -9,6 +9,7 @@ from typing import Any
 import jq
 from flask import Blueprint, Response, current_app, jsonify, render_template, request
 
+from .ai import AGENT_MANAGER_EXTENSION_KEY, AgentExecutionError
 from .assistants import ASSISTANT_EXTENSION_KEY, AssistantServiceError
 from .config import PROJECT_ROOT, PipelineRule
 from .pipeline import execute_rule, fetch_table_list, load_json_payload, run_full_pipeline
@@ -134,6 +135,99 @@ def assist_jq_query() -> Response:
     except AssistantServiceError as exc:  # pragma: no cover - relies on Azure OpenAI
         return jsonify({"error": str(exc)}), 502
 
+    return jsonify(result)
+
+
+def _get_agent_manager():
+    manager = current_app.extensions.get(AGENT_MANAGER_EXTENSION_KEY)
+    if manager is None:
+        raise AgentExecutionError("AI agent manager is not configured")
+    return manager
+
+
+@api_bp.get("/ai-tasks")
+def list_ai_tasks() -> Response:
+    try:
+        manager = _get_agent_manager()
+    except AgentExecutionError as exc:
+        return jsonify({"error": str(exc)}), 503
+    tasks = [task.to_metadata() for task in manager.list_tasks()]
+    return jsonify(tasks)
+
+
+@api_bp.get("/ai-tasks/<string:name>")
+def get_ai_task(name: str) -> Response:
+    try:
+        manager = _get_agent_manager()
+    except AgentExecutionError as exc:
+        return jsonify({"error": str(exc)}), 503
+    try:
+        task = manager.get_task(name)
+    except AgentExecutionError as exc:
+        return jsonify({"error": str(exc)}), 404
+    return jsonify(task.to_metadata())
+
+
+@api_bp.post("/ai-tasks/<string:name>/execute")
+def execute_ai_task(name: str) -> Response:
+    try:
+        manager = _get_agent_manager()
+    except AgentExecutionError as exc:
+        return jsonify({"error": str(exc)}), 503
+    payload = request.get_json(silent=True) or {}
+    inputs = payload.get("inputs") if isinstance(payload.get("inputs"), dict) else {}
+    instructions_override = payload.get("instructions")
+    try:
+        result = manager.execute_task(
+            name,
+            inputs=inputs,
+            instructions_override=instructions_override,
+        )
+    except AgentExecutionError as exc:
+        return jsonify({"error": str(exc)}), 404
+    return jsonify(result)
+
+
+@api_bp.get("/ai-workflows")
+def list_ai_workflows() -> Response:
+    try:
+        manager = _get_agent_manager()
+    except AgentExecutionError as exc:
+        return jsonify({"error": str(exc)}), 503
+    workflows = [workflow.to_metadata() for workflow in manager.list_workflows()]
+    return jsonify(workflows)
+
+
+@api_bp.get("/ai-workflows/<string:name>")
+def get_ai_workflow(name: str) -> Response:
+    try:
+        manager = _get_agent_manager()
+    except AgentExecutionError as exc:
+        return jsonify({"error": str(exc)}), 503
+    try:
+        workflow = manager.get_workflow(name)
+    except AgentExecutionError as exc:
+        return jsonify({"error": str(exc)}), 404
+    return jsonify(workflow.to_metadata())
+
+
+@api_bp.post("/ai-workflows/<string:name>/execute")
+def execute_ai_workflow(name: str) -> Response:
+    try:
+        manager = _get_agent_manager()
+    except AgentExecutionError as exc:
+        return jsonify({"error": str(exc)}), 503
+    payload = request.get_json(silent=True) or {}
+    inputs = payload.get("inputs") if isinstance(payload.get("inputs"), dict) else {}
+    instructions_override = payload.get("instructions")
+    try:
+        result = manager.execute_workflow(
+            name,
+            inputs=inputs,
+            instructions_override=instructions_override,
+        )
+    except AgentExecutionError as exc:
+        return jsonify({"error": str(exc)}), 404
     return jsonify(result)
 
 
