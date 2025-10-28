@@ -1,0 +1,112 @@
+version: 1
+metadata:
+  description: Default table scaffolding for preset observability pillars.
+tables:
+  - name: entities
+    description: Inventory of monitored entities discovered from the status API.
+    columns:
+      - name: EntityType
+        type: TEXT
+        constraints: [NOT NULL]
+      - name: EntityID
+        type: TEXT
+        constraints: [NOT NULL]
+      - name: EntityName
+        type: TEXT
+      - name: EntityCurrentStatus
+        type: TEXT
+      - name: EntityTags
+        type: TEXT
+      - name: LastUpdated
+        type: TEXT
+    indexes:
+      - name: idx_entities_identity
+        unique: true
+        columns: [EntityType, EntityID]
+  - name: metrics
+    description: Generic metric observations resolved from blueprint pipelines.
+    columns:
+      - name: EntityType
+        type: TEXT
+        constraints: [NOT NULL]
+      - name: EntityID
+        type: TEXT
+        constraints: [NOT NULL]
+      - name: EntityInstance
+        type: TEXT
+      - name: MetricName
+        type: TEXT
+        constraints: [NOT NULL]
+      - name: MetricValue
+        type: REAL
+      - name: MetricUnit
+        type: TEXT
+      - name: TimeWindow
+        type: TEXT
+    indexes:
+      - name: idx_metrics_entity_metric
+        columns: [EntityType, EntityID, MetricName]
+  - name: events
+    description: Infrastructure events captured from the applog search API.
+    columns:
+      - name: EntityType
+        type: TEXT
+      - name: EntityID
+        type: TEXT
+      - name: EntityName
+        type: TEXT
+      - name: EventType
+        type: TEXT
+      - name: EventTime
+        type: TEXT
+      - name: Severity
+        type: TEXT
+      - name: Source
+        type: TEXT
+      - name: Message
+        type: TEXT
+      - name: EventId
+        type: TEXT
+      - name: Raw
+        type: TEXT
+    indexes:
+      - name: idx_events_identity
+        unique: true
+        columns: [EventId]
+  - name: logs
+    description: Default log payload layout used prior to entity-specific extracts.
+    columns:
+      - name: entity_id
+        type: TEXT
+        constraints: [NOT NULL]
+      - name: collection_time
+        type: TEXT
+      - name: status
+        type: TEXT
+      - name: details
+        type: TEXT
+    indexes:
+      - name: idx_logs_entity
+        columns: [entity_id]
+  - name: traces
+    description: Trace span scaffolding for traceroute style preset pipelines.
+    columns:
+      - name: EntityType
+        type: TEXT
+      - name: EntityID
+        type: TEXT
+      - name: SpanID
+        type: TEXT
+      - name: ParentSpanID
+        type: TEXT
+      - name: Hop
+        type: INTEGER
+      - name: Target
+        type: TEXT
+      - name: DurationMs
+        type: REAL
+      - name: Raw
+        type: TEXT
+    indexes:
+      - name: idx_traces_entity_span
+        columns: [EntityType, EntityID, SpanID]

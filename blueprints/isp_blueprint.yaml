@@ -11,12 +11,14 @@ entity:
         table_name: entities
         source:
           kind: api
-          endpoint: /app/api/entities/current
+          endpoint: /api/current_status
           parameters:
             entity_type:
               source: params.entity_filter
               description: Entity filter applied to the inventory response
               required: true
+        cache:
+          path: .cache/api_current_status.json
         sample:
           path: sample_inputs/entities/api_current_status.json
           format: json
@@ -52,6 +54,8 @@ entity:
               source: entity.EntityID
               description: Monitor identifier for the ISP entity
               required: true
+        cache:
+          template: .cache/{entity_type}/api_{entity_type_lower}_{entity_id}_tabulardetails.json
         sample:
           path: sample_inputs/metrics/api_isp_tabular_details_15698000397185121.json
           format: json
@@ -104,6 +108,8 @@ entity:
               source: entity.EntityID
               description: Monitor identifier for traceroute spans
               required: true
+        cache:
+          template: .cache/{entity_type}/api_{entity_type_lower}_{entity_id}_traceroute.json
         sample:
           path: sample_inputs/traces/api_isp_traceroute_15698000397185121.json
           format: json
@@ -126,6 +132,8 @@ entity:
             date:
               source: params.report_date
               description: ISO date for the log report window
+        cache:
+          template: .cache/{entity_type}/api_{entity_type_lower}_{entity_id}_log_reports.json
         sample:
           path: sample_inputs/logs/api_isp_15698000397185121_logreport.json
           format: json
@@ -159,6 +167,7 @@ entity:
           endpoint: /api/applog/search/{start_date}%20{start_time}/{end_date}%20{end_time}/{range}/desc
           config:
             query_param: q
+            query_template: logtype="Infrastructure Events" and source="{entity_type}"
             pagination:
               page_size: 100
               start_index: 1
@@ -185,6 +194,8 @@ entity:
             monitor_id:
               source: entity.EntityID
               description: Monitor identifier for context
+        cache:
+          template: .cache/{entity_type}/api_{entity_type_lower}_{entity_id}_applog_search.json
         sample:
           path: sample_inputs/events/api_isp_infrastructure_events.json
           format: json

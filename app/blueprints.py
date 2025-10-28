@@ -32,6 +32,8 @@ class BlueprintTable:
     upsert_keys: tuple[str, ...] | None
     description: str | None
     metadata: Dict[str, Any] = field(default_factory=dict)
+    cache_path: Path | None = None
+    cache_template: str | None = None
 
     def to_metadata(self, project_root: Path, *, entity_type: str) -> Dict[str, Any]:
         """Summarise the table for UI consumption."""
@@ -63,6 +65,13 @@ class BlueprintTable:
             "method": self.source_method,
             "parameters": self.source_parameters,
         }
+        if self.cache_path or self.cache_template:
+            cache_meta: Dict[str, Any] = {}
+            if self.cache_path:
+                cache_meta["path"] = _relative(self.cache_path)
+            if self.cache_template:
+                cache_meta["template"] = self.cache_template
+            metadata["cache"] = cache_meta
         if self.sample_format:
             metadata["sample_format"] = self.sample_format
         return metadata
@@ -396,6 +405,21 @@ class BlueprintRegistry:
         else:
             description = None
 
+        cache_spec = entry.get("cache") or metadata.pop("cache", None)
+        cache_path: Path | None = None
+        cache_template: str | None = None
+        if isinstance(cache_spec, Mapping):
+            cache_path_value = cache_spec.get("path")
+            cache_template_value = cache_spec.get("template")
+        else:
+            cache_path_value = cache_spec
+            cache_template_value = None
+
+        if cache_path_value:
+            cache_path = self._resolve_cache_path(cache_path_value, base_dir)
+        if cache_template_value and isinstance(cache_template_value, str):
+            cache_template = cache_template_value
+
         return BlueprintTable(
             kind=kind,
             type=table_type,
@@ -413,6 +437,8 @@ class BlueprintRegistry:
             upsert_keys=parsed_upsert,
             description=description,
             metadata=metadata,
+            cache_path=cache_path,
+            cache_template=cache_template,
         )
 
     def _resolve_rule_path(self, rule: str, base_dir: Path) -> Path:
@@ -432,6 +458,16 @@ class BlueprintRegistry:
             if candidate.exists():
                 return candidate
         return None
+
+    def _resolve_cache_path(self, value: Any, base_dir: Path) -> Path | None:
+        if not value:
+            return None
+        path = Path(str(value))
+        if path.is_absolute():
+            return path
+        if str(path).startswith(".cache"):
+            return (self.project_root / path).resolve()
+        return (base_dir / path).resolve()
 
     def _candidate_paths(self, path: Path, base_dir: Path, *, subdir: str) -> Iterable[Path]:
         if path.is_absolute():
