@@ -59,6 +59,7 @@ class AppConfig:
 
     database_path: Path
     storage_dir: Path
+    cache_dir: Path
     pipeline_rules: tuple[PipelineRule, ...]
     credentials: Dict[str, str]
     blueprint_registry: BlueprintRegistry
@@ -69,6 +70,8 @@ class AppConfig:
 
         storage = _default_storage_dir()
         database_path = storage / "observability.db"
+        cache_dir = (PROJECT_ROOT / ".cache").resolve()
+        cache_dir.mkdir(parents=True, exist_ok=True)
 
         # Demo credentials – defaults are safe placeholders that can be
         # overridden locally without affecting version control.
@@ -88,6 +91,7 @@ class AppConfig:
         return cls(
             database_path=database_path,
             storage_dir=storage,
+            cache_dir=cache_dir,
             pipeline_rules=rules,
             credentials=credentials,
             blueprint_registry=blueprints,
@@ -101,6 +105,7 @@ class AppConfig:
             "PIPELINE_RULES": [*base_rules, *blueprint_rules],
             "CREDENTIALS": self.credentials,
             "BLUEPRINTS": self.blueprint_registry.describe(),
+            "CACHE_DIR": str(self.cache_dir),
         }
 
     @staticmethod

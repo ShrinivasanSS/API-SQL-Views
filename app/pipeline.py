@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import io
+import json
 import sqlite3
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Sequence
 
 import pandas as pd
-
-import json
+import yaml
+import re
 
 
 def _lookup_path(data: Any, path: str) -> Any:
@@ -84,8 +88,321 @@ def _resolve_parameter_bindings(
 
     return resolved
 
-from .config import AppConfig, PipelineRule
+from .config import AppConfig, PipelineRule, PROJECT_ROOT
 from .extractors import apply_extractors
+
+
+def _stringify_format_value(value: Any) -> Any:
+    if value is None:
+        return ""
+    if isinstance(value, (str, int, float)):
+        return value
+    return str(value)
+
+
+def _render_endpoint(endpoint: str | None, *, params: Mapping[str, Any]) -> str | None:
+    if not endpoint:
+        return None
+    context = {key: _stringify_format_value(value) for key, value in params.items()}
+    try:
+        return endpoint.format(**context)
+    except Exception:
+        return endpoint
+
+
+def _endpoint_slug(endpoint: str | None) -> str:
+    if not endpoint:
+        return "payload"
+    cleaned = endpoint.strip().strip("/")
+    if not cleaned:
+        return "payload"
+    cleaned = cleaned.replace("%20", "_")
+    cleaned = re.sub(r"[^A-Za-z0-9_/{-}]+", "_", cleaned)
+    parts = [part for part in cleaned.split("/") if part]
+    if not parts:
+        return "payload"
+    slug = parts[-1]
+    slug = slug.replace("-", "_")
+    slug = slug.replace("{", "").replace("}", "")
+    return slug or "payload"
+
+
+def _normalise_cache_location(value: str | Path, config: AppConfig) -> Path:
+    path = Path(value)
+    if path.is_absolute():
+        return path
+    if str(path).startswith(".cache"):
+        return (PROJECT_ROOT / path).resolve()
+    return (config.cache_dir / path).resolve()
+
+
+def _render_cache_path(
+    table: "BlueprintTable",
+    *,
+    params: Mapping[str, Any],
+    entity: Mapping[str, Any] | None,
+    entity_type: str,
+    config: AppConfig,
+) -> Path | None:
+    if table.cache_path:
+        return table.cache_path
+    if not table.cache_template:
+        return None
+
+    context: Dict[str, Any] = {}
+    context.update(params)
+    entity_id = None
+    entity_name = None
+    entity_type_context = entity_type
+    if entity:
+        entity_id = entity.get("EntityID", params.get("entity_id"))
+        entity_name = entity.get("EntityName")
+        entity_type_context = entity.get("EntityType", entity_type)
+    else:
+        entity_id = (
+            params.get("entity_id")
+            or params.get("monitor_id")
+            or params.get("EntityID")
+        )
+        entity_name = params.get("entity_name")
+        entity_type_context = (
+            params.get("entity_type")
+            or params.get("blueprint_entity_type")
+            or entity_type
+        )
+
+    context.setdefault("entity_id", entity_id)
+    context.setdefault("entity_name", entity_name)
+    context.setdefault("entity_type", entity_type_context)
+    context.setdefault(
+        "entity_type_lower", str(context.get("entity_type") or "").lower()
+    )
+    context.setdefault("table_name", table.table_name)
+    context.setdefault("table_type", table.type)
+    context.setdefault("endpoint_slug", _endpoint_slug(table.source_endpoint))
+
+    try:
+        rendered = table.cache_template.format(**context)
+    except Exception:
+        rendered = table.cache_template
+
+    return _normalise_cache_location(rendered, config)
+
+
+def _load_default_payload(table: "BlueprintTable") -> Any:
+    if not table.sample_path or not table.sample_path.exists():
+        return None
+    try:
+        return json.loads(table.sample_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+
+
+def _resolve_query_parameters(
+    table: "BlueprintTable",
+    *,
+    params: Mapping[str, Any],
+    entity_type: str,
+) -> Dict[str, str]:
+    config = table.source_config or {}
+    query: Dict[str, str] = {}
+
+    query_param = config.get("query_param")
+    if query_param:
+        template = config.get("query_template")
+        value = config.get("query_value")
+        context: Dict[str, Any] = {}
+        context.update(params)
+        context.setdefault("entity_type", params.get("entity_type") or entity_type)
+        context.setdefault(
+            "entity_type_lower", str(context.get("entity_type") or "").lower()
+        )
+        context.setdefault(
+            "entity_id",
+            params.get("entity_id")
+            or params.get("monitor_id")
+            or params.get("EntityID"),
+        )
+        if template:
+            try:
+                value = template.format(**context)
+            except Exception:
+                value = template
+        if value is not None:
+            query[query_param] = value
+
+    extra = config.get("query_params") or {}
+    if isinstance(extra, Mapping):
+        for key, raw in extra.items():
+            if isinstance(raw, str):
+                try:
+                    query[key] = raw.format(**params)
+                except Exception:
+                    query[key] = raw
+            elif raw is not None:
+                query[key] = str(raw)
+
+    return {key: str(value) for key, value in query.items() if value is not None}
+
+
+def _fetch_api_payload(
+    table: "BlueprintTable",
+    *,
+    params: Mapping[str, Any],
+    entity_type: str,
+    config: AppConfig,
+) -> Any:
+    base_url = (config.credentials.get("api_domain") or "").strip()
+    if not base_url or not table.source_endpoint:
+        return None
+
+    endpoint = _render_endpoint(table.source_endpoint, params=params)
+    if not endpoint:
+        return None
+
+    base = base_url.rstrip("/") + "/"
+    url = urllib.parse.urljoin(base, str(endpoint).lstrip("/"))
+    query_params = _resolve_query_parameters(table, params=params, entity_type=entity_type)
+    if query_params:
+        url += ("&" if "?" in url else "?") + urllib.parse.urlencode(query_params)
+
+    request = urllib.request.Request(
+        url,
+        headers={"Accept": "application/json"},
+        method=table.source_method or "GET",
+    )
+
+    data = None
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            charset = response.headers.get_content_charset() or "utf-8"
+            payload = response.read().decode(charset, errors="replace")
+            data = json.loads(payload)
+    except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError):
+        return None
+
+    return data
+
+
+def _load_payload_with_cache(
+    table: "BlueprintTable",
+    *,
+    params: Mapping[str, Any],
+    entity: Mapping[str, Any] | None,
+    entity_type: str,
+    config: AppConfig,
+    cache_path: Path | None = None,
+) -> Any:
+    if cache_path is None:
+        cache_path = _render_cache_path(
+            table,
+            params=params,
+            entity=entity,
+            entity_type=entity_type,
+            config=config,
+        )
+
+    if cache_path and cache_path.exists():
+        try:
+            return json.loads(cache_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            cache_path.unlink(missing_ok=True)
+
+    payload = _fetch_api_payload(
+        table, params=params, entity_type=entity_type, config=config
+    )
+    if payload is None:
+        payload = _load_default_payload(table)
+
+    if payload is not None and cache_path:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+
+    return payload if payload is not None else {}
+
+
+def _load_seed_configuration() -> Dict[str, Any]:
+    seed_path = PROJECT_ROOT / "seed.yaml"
+    if not seed_path.exists():
+        return {}
+    try:
+        data = yaml.safe_load(seed_path.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError:
+        return {}
+    return data if isinstance(data, Mapping) else {}
+
+
+def _initialise_database_schema(config: AppConfig) -> None:
+    seed = _load_seed_configuration()
+    tables = seed.get("tables") if isinstance(seed, Mapping) else None
+    if not tables:
+        return
+
+    config.database_path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(config.database_path) as conn:
+        for table in tables:
+            if not isinstance(table, Mapping):
+                continue
+            name = table.get("name")
+            columns = table.get("columns")
+            if not name or not columns:
+                continue
+
+            column_defs: List[str] = []
+            for column in columns:
+                if not isinstance(column, Mapping):
+                    continue
+                col_name = column.get("name")
+                col_type = column.get("type", "TEXT")
+                if not col_name:
+                    continue
+                constraints = column.get("constraints") or []
+                if isinstance(constraints, str):
+                    constraints_parts = [constraints]
+                elif isinstance(constraints, Sequence) and not isinstance(
+                    constraints, (str, bytes, bytearray)
+                ):
+                    constraints_parts = [str(value) for value in constraints if value]
+                else:
+                    constraints_parts = []
+                definition = " ".join(
+                    part
+                    for part in [str(col_name), str(col_type), *constraints_parts]
+                    if str(part)
+                )
+                if definition:
+                    column_defs.append(definition)
+
+            if not column_defs:
+                continue
+
+            column_sql = ", ".join(column_defs)
+            conn.execute(f"CREATE TABLE IF NOT EXISTS {name} ({column_sql})")
+
+            for index in table.get("indexes", []):
+                if not isinstance(index, Mapping):
+                    continue
+                idx_columns = index.get("columns")
+                if not idx_columns:
+                    continue
+                if isinstance(idx_columns, Sequence) and not isinstance(
+                    idx_columns, (str, bytes, bytearray)
+                ):
+                    columns_sql = ", ".join(str(col) for col in idx_columns if col)
+                else:
+                    columns_sql = str(idx_columns)
+                if not columns_sql:
+                    continue
+                idx_name = index.get("name") or f"idx_{name}_{columns_sql.replace(', ', '_')}"
+                unique = "UNIQUE " if index.get("unique") else ""
+                conn.execute(
+                    f"CREATE {unique}INDEX IF NOT EXISTS {idx_name} ON {name} ({columns_sql})"
+                )
+
+        conn.commit()
 
 
 def load_json_payload(path: Path) -> pd.DataFrame:
@@ -238,8 +555,6 @@ def run_blueprint_entitylists(config: AppConfig) -> List[Dict[str, Any]]:
         for table in blueprint_obj.iter_tables():
             if table.type.lower() != "entitylist":
                 continue
-            if table.sample_path is None:
-                continue
 
             params: Dict[str, Any] = {**table.inputs}
             params.setdefault("entity_type", entity_type)
@@ -249,6 +564,14 @@ def run_blueprint_entitylists(config: AppConfig) -> List[Dict[str, Any]]:
                 table.source_parameters, params=params, entity=entity_context
             )
             params.update(resolved_params)
+
+            cache_path = _render_cache_path(
+                table,
+                params=params,
+                entity=entity_context,
+                entity_type=entity_type,
+                config=config,
+            )
 
             context_globals = {
                 "ENTITY_ROW": entity_context,
@@ -270,7 +593,14 @@ def run_blueprint_entitylists(config: AppConfig) -> List[Dict[str, Any]]:
             upsert_keys = table.upsert_keys or blueprint_obj.default_upsert_keys(table.type)
             load_mode = "upsert" if upsert_keys else "replace"
 
-            payload = json.loads(table.sample_path.read_text(encoding="utf-8"))
+            payload = _load_payload_with_cache(
+                table,
+                params=params,
+                entity=entity_context,
+                entity_type=entity_type,
+                config=config,
+                cache_path=cache_path,
+            )
             extractor_context = {
                 "params": params,
                 "entity": entity_context,
@@ -302,7 +632,9 @@ def run_blueprint_entitylists(config: AppConfig) -> List[Dict[str, Any]]:
                     rule = PipelineRule(
                         name=f"{table.type}:{table.table_name}:{transform_path.stem}",
                         title=f"{entity_type} {table.type} · {table.table_name}",
-                        input_path=table.sample_path,
+                        input_path=cache_path
+                        or table.sample_path
+                        or (config.cache_dir / f"{table.table_name}.json"),
                         rule_path=transform_path,
                         table_name=table.table_name,
                         table_type=table.kind,
@@ -385,8 +717,6 @@ def run_blueprint_pipeline(config: AppConfig) -> List[Dict[str, Any]]:
         for table in blueprint.iter_tables():
             if table.type.lower() == "entitylist":
                 continue
-            if table.sample_path is None:
-                continue
 
             params = {**table.inputs}
             params.setdefault("entity_type", entity_type)
@@ -400,6 +730,14 @@ def run_blueprint_pipeline(config: AppConfig) -> List[Dict[str, Any]]:
                 table.source_parameters, params=params, entity=entity
             )
             params.update(resolved_params)
+
+            cache_path = _render_cache_path(
+                table,
+                params=params,
+                entity=entity,
+                entity_type=entity_type,
+                config=config,
+            )
 
             context_globals = {
                 "ENTITY_ROW": entity,
@@ -426,7 +764,14 @@ def run_blueprint_pipeline(config: AppConfig) -> List[Dict[str, Any]]:
             load_mode = "upsert" if upsert_keys else "replace"
 
             if table.extractors:
-                payload = json.loads(table.sample_path.read_text(encoding="utf-8"))
+                payload = _load_payload_with_cache(
+                    table,
+                    params=params,
+                    entity=entity,
+                    entity_type=entity_type,
+                    config=config,
+                    cache_path=cache_path,
+                )
                 extractor_context = {
                     "params": params,
                     "entity": entity,
@@ -445,7 +790,9 @@ def run_blueprint_pipeline(config: AppConfig) -> List[Dict[str, Any]]:
                         rule = PipelineRule(
                             name=f"{table.type}:{table.table_name}:{entity_id}:{transform_path.stem}",
                             title=f"{entity_type} {table.type} · {table.table_name}",
-                            input_path=table.sample_path,
+                            input_path=cache_path
+                            or table.sample_path
+                            or (config.cache_dir / f"{table.table_name}.json"),
                             rule_path=transform_path,
                             table_name=table.table_name,
                             table_type=table.kind,
@@ -499,7 +846,9 @@ def run_blueprint_pipeline(config: AppConfig) -> List[Dict[str, Any]]:
                 rule = PipelineRule(
                     name=f"{table.type}:{table.table_name}:{entity_id}:{transform_path.stem}",
                     title=f"{entity_type} {table.type} · {table.table_name}",
-                    input_path=table.sample_path,
+                    input_path=cache_path
+                    or table.sample_path
+                    or (config.cache_dir / f"{table.table_name}.json"),
                     rule_path=transform_path,
                     table_name=table.table_name,
                     table_type=table.kind,
@@ -528,6 +877,7 @@ def run_blueprint_pipeline(config: AppConfig) -> List[Dict[str, Any]]:
 def ensure_database_seeded(config: AppConfig) -> None:
     """Ensure the SQLite database contains freshly transformed tables."""
 
+    _initialise_database_schema(config)
     run_full_pipeline(config)
 
 

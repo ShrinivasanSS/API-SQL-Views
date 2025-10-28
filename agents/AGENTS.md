@@ -4,6 +4,7 @@
 - Phase I and Phase II foundations are complete: APIs, tables, and views are scaffolded and blueprints now drive pipeline execution.
 - Blueprint registry (`blueprints/blueprints.csv`) resolves YAML blueprints (e.g., `blueprints/isp_blueprint.yaml`) that describe entity sources, rules, and views.
 - UI exposes credentials, APIs, transformation rules, database tables, and now a blueprint catalogue with inspectors.
+- Startup seeding now provisions default tables via `seed.yaml` and cached API payloads live under `.cache` to avoid redundant fetches.
 
 ## Project Goals
 - Simplify construction of tables and views from YAML configurations while keeping the system extensible for future phases.
@@ -22,4 +23,4 @@
   - `app/static/` contains the UI (CSS/JS) and templates live in `app/templates/`.
 - `blueprints/` stores registry CSV + YAML definitions.
 - `sample_inputs/`, `sample_transformation_rules/`, and `storage/` provide demo data, rules, and generated artefacts.
-- `agents/todo-Phase-*.md` capture phase requirements; update this `AGENTS.md` as checkpoints evolve.
+- `agents/[DONE]-Phase-*.md` capture completed phase requirements; update this `AGENTS.md` as checkpoints evolve.
