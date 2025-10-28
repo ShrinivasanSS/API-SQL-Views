@@ -10,6 +10,11 @@ const state = {
   selectedBlueprint: null,
   selectedBlueprintTable: null,
   blueprintDrafts: {},
+  assistantModes: {
+    apis: "code",
+    rules: "code",
+    tables: "code",
+  },
 };
 
 function escapeHtml(value) {
@@ -64,6 +69,67 @@ const contentPane = () => document.getElementById("content-pane");
 const detailPane = () => document.getElementById("detail-controls");
 const detailTitle = () => document.getElementById("detail-title");
 
+function assistantContainer(key) {
+  return detailPane().querySelector(`[data-assistant="${key}"]`);
+}
+
+function updateAssistantPanels(key) {
+  const container = assistantContainer(key);
+  if (!container) {
+    return;
+  }
+  const mode = state.assistantModes[key] || "code";
+  container
+    .querySelectorAll("[data-mode]")
+    .forEach((btn) => btn.classList.toggle("active", btn.dataset.mode === mode));
+  container
+    .querySelectorAll("[data-mode-panel]")
+    .forEach((panel) =>
+      panel.classList.toggle("hidden", panel.dataset.modePanel !== mode)
+    );
+}
+
+function initAssistantToggle(key) {
+  const container = assistantContainer(key);
+  if (!container) {
+    return;
+  }
+  container.querySelectorAll("[data-mode]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.assistantModes[key] = btn.dataset.mode;
+      updateAssistantPanels(key);
+    });
+  });
+  updateAssistantPanels(key);
+}
+
+function setAssistantStatus(key, message, isError = false) {
+  const container = assistantContainer(key);
+  if (!container) {
+    return;
+  }
+  const output = container.querySelector(".assistant-output");
+  if (!output) {
+    return;
+  }
+  output.textContent = message;
+  const hasMessage = Boolean(message);
+  output.classList.toggle("text-error", Boolean(isError && hasMessage));
+  output.classList.toggle("text-success", Boolean(!isError && hasMessage));
+}
+
+function setAssistantLoading(key, isLoading) {
+  const container = assistantContainer(key);
+  if (!container) {
+    return;
+  }
+  const button = container.querySelector('[data-assistant-action="ask"]');
+  if (button) {
+    button.disabled = isLoading;
+    button.classList.toggle("loading", isLoading);
+  }
+}
+
 function setViewHeader(view) {
   const copy = viewCopy[view];
   document.getElementById("view-title").textContent = copy.title;
@@ -117,18 +183,35 @@ async function renderApisView() {
   setViewHeader("apis");
   detailTitle().textContent = "JQ Explorer";
   detailPane().innerHTML = `
-    <div class="right-pane-block">
-      <h4>Run JQ Query</h4>
-      <textarea id="jq-query" placeholder="e.g. .data.monitors[0]"></textarea>
-      <div class="flex">
-        <button class="primary" id="run-jq">Run</button>
-        <button class="secondary" id="copy-jq-result">Copy Result</button>
+    <div class="right-pane-block" data-assistant="apis">
+      <div class="assistant-header">
+        <h4>JQ Query Builder</h4>
+        <div class="mode-toggle">
+          <button type="button" data-mode="code" class="toggle-button">Code</button>
+          <button type="button" data-mode="nl" class="toggle-button">Natural Language</button>
+        </div>
+      </div>
+      <div data-mode-panel="code">
+        <textarea id="jq-query" placeholder="e.g. .data.monitors[0]"></textarea>
+        <div class="flex">
+          <button class="primary" id="run-jq">Run</button>
+          <button class="secondary" id="copy-jq-result">Copy Result</button>
+        </div>
+      </div>
+      <div data-mode-panel="nl" class="hidden">
+        <textarea id="jq-assistant-prompt" placeholder="Describe the JSON fields you want to retrieve"></textarea>
+        <div class="flex">
+          <button class="primary" id="ask-jq-assistant" data-assistant-action="ask">Generate Query</button>
+        </div>
+        <div class="assistant-output muted" id="jq-assistant-output">Switch to Natural Language and describe the insight you need.</div>
       </div>
     </div>
     <div class="right-pane-block">
       <h4>Result</h4>
       <div class="result-box" id="jq-result">Select an API payload to query.</div>
     </div>`;
+
+  initAssistantToggle("apis");
 
   await ensureApiPayloadsLoaded();
   const listItems = state.apiPayloads
@@ -157,6 +240,10 @@ async function renderApisView() {
 
   document.getElementById("run-jq").addEventListener("click", () => executeJqQuery());
   document.getElementById("copy-jq-result").addEventListener("click", copyJqResult);
+  const askAssistant = document.getElementById("ask-jq-assistant");
+  if (askAssistant) {
+    askAssistant.addEventListener("click", () => askJqAssistant());
+  }
 
   if (state.selectedApi) {
     const el = contentPane().querySelector(`.list-item[data-id="${state.selectedApi}"]`);
@@ -227,6 +314,64 @@ async function copyJqResult() {
   showPipelineStatus("JQ result copied to clipboard.");
 }
 
+async function askJqAssistant() {
+  if (!state.selectedApi) {
+    setAssistantStatus("apis", "Select an API payload to give the assistant context.", true);
+    return;
+  }
+  const promptInput = document.getElementById("jq-assistant-prompt");
+  const prompt = promptInput ? promptInput.value.trim() : "";
+  if (!prompt) {
+    setAssistantStatus("apis", "Enter a natural language prompt for the assistant.", true);
+    if (promptInput) {
+      promptInput.focus();
+    }
+    return;
+  }
+
+  setAssistantLoading("apis", true);
+  setAssistantStatus("apis", "Generating query suggestion…");
+
+  try {
+    const res = await fetch("/api/assistants/apis", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt, payload_id: state.selectedApi }),
+    });
+    const payload = await res.json();
+    if (!res.ok) {
+      setAssistantStatus("apis", payload.error || "Assistant request failed", true);
+      return;
+    }
+
+    const query = payload.query || payload.code || "";
+    const explanation = payload.explanation || "";
+    const editor = document.getElementById("jq-query");
+    if (query && editor) {
+      editor.value = query;
+      state.assistantModes.apis = "code";
+      updateAssistantPanels("apis");
+      await executeJqQuery();
+    }
+    const sections = [];
+    if (query) {
+      sections.push(`Suggested query:\n${query}`);
+    }
+    if (explanation) {
+      sections.push(explanation);
+    }
+    setAssistantStatus(
+      "apis",
+      sections.join("\n\n") || "No query suggestion was generated.",
+      !query
+    );
+  } catch (err) {
+    setAssistantStatus("apis", `Assistant error: ${err.message}`, true);
+  } finally {
+    setAssistantLoading("apis", false);
+  }
+}
+
 async function ensureRulesLoaded() {
   if (state.rules.length) {
     return;
@@ -240,13 +385,28 @@ async function renderRulesView() {
   detailTitle().textContent = "Rule Designer";
 
   detailPane().innerHTML = `
-    <div class="right-pane-block">
-      <h4>Preview Transformation</h4>
-      <textarea id="rule-preview-content" placeholder="Paste a rule snippet or edit an existing rule."></textarea>
-      <input type="text" id="rule-preview-input" placeholder="Relative input path (e.g. sample_inputs/entities/api_current_status.json)" />
-      <div class="flex">
-        <button class="primary" id="run-rule-preview">Preview</button>
-        <button class="secondary" id="save-rule">Save as New Rule</button>
+    <div class="right-pane-block" data-assistant="rules">
+      <div class="assistant-header">
+        <h4>Rule Editor</h4>
+        <div class="mode-toggle">
+          <button type="button" data-mode="code" class="toggle-button">Code</button>
+          <button type="button" data-mode="nl" class="toggle-button">Natural Language</button>
+        </div>
+      </div>
+      <div data-mode-panel="code">
+        <textarea id="rule-preview-content" placeholder="Paste a rule snippet or edit an existing rule."></textarea>
+        <input type="text" id="rule-preview-input" placeholder="Relative input path (e.g. sample_inputs/entities/api_current_status.json)" />
+        <div class="flex">
+          <button class="primary" id="run-rule-preview">Preview</button>
+          <button class="secondary" id="save-rule">Save as New Rule</button>
+        </div>
+      </div>
+      <div data-mode-panel="nl" class="hidden">
+        <textarea id="rule-assistant-prompt" placeholder="Explain the transformation you need or the columns to produce"></textarea>
+        <div class="flex">
+          <button class="primary" id="ask-rule-assistant" data-assistant-action="ask">Generate Rule</button>
+        </div>
+        <div class="assistant-output muted" id="rule-assistant-output">Describe the desired transformation to have a draft Python rule generated.</div>
       </div>
     </div>
     <div class="right-pane-block">
@@ -254,10 +414,16 @@ async function renderRulesView() {
       <div class="result-box" id="rule-preview-result">Select a rule to populate the editor.</div>
     </div>`;
 
+  initAssistantToggle("rules");
+
   document
     .getElementById("run-rule-preview")
     .addEventListener("click", () => previewRuleTransformation());
   document.getElementById("save-rule").addEventListener("click", () => saveCustomRule());
+  const askAssistant = document.getElementById("ask-rule-assistant");
+  if (askAssistant) {
+    askAssistant.addEventListener("click", () => askRuleAssistant());
+  }
 
   await ensureRulesLoaded();
 
@@ -357,6 +523,64 @@ async function saveCustomRule() {
   }
 }
 
+async function askRuleAssistant() {
+  const promptInput = document.getElementById("rule-assistant-prompt");
+  const prompt = promptInput ? promptInput.value.trim() : "";
+  if (!prompt) {
+    setAssistantStatus("rules", "Tell the assistant what transformation you need.", true);
+    if (promptInput) {
+      promptInput.focus();
+    }
+    return;
+  }
+
+  const codeEditor = document.getElementById("rule-preview-content");
+  const inputField = document.getElementById("rule-preview-input");
+  const currentCode = codeEditor ? codeEditor.value : "";
+  const inputPath = inputField ? inputField.value : "";
+
+  setAssistantLoading("rules", true);
+  setAssistantStatus("rules", "Drafting Python rule…");
+
+  try {
+    const res = await fetch("/api/assistants/rules", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt, current_code: currentCode, input_path: inputPath }),
+    });
+    const payload = await res.json();
+    if (!res.ok) {
+      setAssistantStatus("rules", payload.error || "Assistant request failed", true);
+      return;
+    }
+
+    const code = payload.code || payload.query || "";
+    const explanation = payload.explanation || "";
+    if (code && codeEditor) {
+      codeEditor.value = code;
+      state.assistantModes.rules = "code";
+      updateAssistantPanels("rules");
+      await previewRuleTransformation();
+    }
+    const sections = [];
+    if (code) {
+      sections.push("Rule updated in the editor.");
+    }
+    if (explanation) {
+      sections.push(explanation);
+    }
+    setAssistantStatus(
+      "rules",
+      sections.join("\n\n") || "No code suggestion was generated.",
+      !code
+    );
+  } catch (err) {
+    setAssistantStatus("rules", `Assistant error: ${err.message}`, true);
+  } finally {
+    setAssistantLoading("rules", false);
+  }
+}
+
 async function ensureTablesLoaded() {
   const res = await fetch("/api/tables");
   state.tables = await res.json();
@@ -366,17 +590,38 @@ async function renderTablesView() {
   setViewHeader("tables");
   detailTitle().textContent = "SQL Query";
   detailPane().innerHTML = `
-    <div class="right-pane-block">
-      <h4>Run SQLite Query</h4>
-      <textarea id="sql-query" placeholder="SELECT * FROM entities LIMIT 10;"></textarea>
-      <button class="primary" id="run-sql">Execute</button>
+    <div class="right-pane-block" data-assistant="tables">
+      <div class="assistant-header">
+        <h4>SQL Workbench</h4>
+        <div class="mode-toggle">
+          <button type="button" data-mode="code" class="toggle-button">Code</button>
+          <button type="button" data-mode="nl" class="toggle-button">Natural Language</button>
+        </div>
+      </div>
+      <div data-mode-panel="code">
+        <textarea id="sql-query" placeholder="SELECT * FROM entities LIMIT 10;"></textarea>
+        <button class="primary" id="run-sql">Execute</button>
+      </div>
+      <div data-mode-panel="nl" class="hidden">
+        <textarea id="sql-assistant-prompt" placeholder="Ask a question about the tables or describe the dataset you need"></textarea>
+        <div class="flex">
+          <button class="primary" id="ask-sql-assistant" data-assistant-action="ask">Generate SQL</button>
+        </div>
+        <div class="assistant-output muted" id="sql-assistant-output">Use natural language to generate SQLite queries and run them automatically.</div>
+      </div>
     </div>
     <div class="right-pane-block">
       <h4>Result</h4>
       <div class="result-box" id="sql-result">Choose a table to populate the query editor.</div>
     </div>`;
 
+  initAssistantToggle("tables");
+
   document.getElementById("run-sql").addEventListener("click", () => executeSqlQuery());
+  const askAssistant = document.getElementById("ask-sql-assistant");
+  if (askAssistant) {
+    askAssistant.addEventListener("click", () => askSqlAssistant());
+  }
 
   await ensureTablesLoaded();
 
@@ -428,6 +673,60 @@ async function executeSqlQuery() {
     resultBox.textContent = `Error: ${payload.error}`;
   } else {
     resultBox.textContent = JSON.stringify(payload, null, 2);
+  }
+}
+
+async function askSqlAssistant() {
+  const promptInput = document.getElementById("sql-assistant-prompt");
+  const prompt = promptInput ? promptInput.value.trim() : "";
+  if (!prompt) {
+    setAssistantStatus("tables", "Describe the dataset you want the assistant to query.", true);
+    if (promptInput) {
+      promptInput.focus();
+    }
+    return;
+  }
+
+  setAssistantLoading("tables", true);
+  setAssistantStatus("tables", "Generating SQL…");
+
+  try {
+    const res = await fetch("/api/assistants/tables", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt, table_name: state.selectedTable }),
+    });
+    const payload = await res.json();
+    if (!res.ok) {
+      setAssistantStatus("tables", payload.error || "Assistant request failed", true);
+      return;
+    }
+
+    const query = payload.query || payload.code || "";
+    const explanation = payload.explanation || "";
+    const editor = document.getElementById("sql-query");
+    if (query && editor) {
+      editor.value = query;
+      state.assistantModes.tables = "code";
+      updateAssistantPanels("tables");
+      await executeSqlQuery();
+    }
+    const sections = [];
+    if (query) {
+      sections.push("SQL applied in the editor.");
+    }
+    if (explanation) {
+      sections.push(explanation);
+    }
+    setAssistantStatus(
+      "tables",
+      sections.join("\n\n") || "No SQL suggestion was generated.",
+      !query
+    );
+  } catch (err) {
+    setAssistantStatus("tables", `Assistant error: ${err.message}`, true);
+  } finally {
+    setAssistantLoading("tables", false);
   }
 }
 

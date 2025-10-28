@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
 import jq
 from flask import Blueprint, Response, current_app, jsonify, render_template, request
 
+from .assistants import ASSISTANT_EXTENSION_KEY, AssistantServiceError
 from .config import PROJECT_ROOT, PipelineRule
 from .pipeline import execute_rule, fetch_table_list, load_json_payload, run_full_pipeline
 from .pipeline import run_sql_query
@@ -110,6 +112,31 @@ def run_jq_query(payload_id: str) -> Response:
     return jsonify({"result": result})
 
 
+@api_bp.post("/assistants/apis")
+def assist_jq_query() -> Response:
+    service = current_app.extensions.get(ASSISTANT_EXTENSION_KEY)
+    if service is None:
+        return jsonify({"error": "Assistant service is not configured"}), 503
+
+    payload = request.get_json(force=True)
+    prompt = (payload.get("prompt") or "").strip()
+    payload_id = (payload.get("payload_id") or "").strip()
+    if not prompt:
+        return jsonify({"error": "Prompt is required"}), 400
+    if not payload_id:
+        return jsonify({"error": "payload_id is required"}), 400
+
+    data = load_json(safe_resolve(SAMPLE_INPUTS, payload_id))
+    excerpt = _truncate_json(data)
+
+    try:
+        result = service.suggest_jq(prompt=prompt, payload_excerpt=excerpt)
+    except AssistantServiceError as exc:  # pragma: no cover - relies on Azure OpenAI
+        return jsonify({"error": str(exc)}), 502
+
+    return jsonify(result)
+
+
 @api_bp.get("/rules")
 def list_rules() -> Response:
     rules = []
@@ -192,6 +219,39 @@ def preview_rule() -> Response:
     )
 
 
+@api_bp.post("/assistants/rules")
+def assist_rule_generation() -> Response:
+    service = current_app.extensions.get(ASSISTANT_EXTENSION_KEY)
+    if service is None:
+        return jsonify({"error": "Assistant service is not configured"}), 503
+
+    payload = request.get_json(force=True)
+    prompt = (payload.get("prompt") or "").strip()
+    if not prompt:
+        return jsonify({"error": "Prompt is required"}), 400
+
+    current_code = payload.get("current_code") or ""
+    input_path = payload.get("input_path") or ""
+    preview = ""
+    if input_path:
+        try:
+            json_payload = load_json(safe_resolve(PROJECT_ROOT, input_path))
+            preview = _truncate_json(json_payload)
+        except FileNotFoundError:
+            preview = ""
+
+    try:
+        result = service.suggest_rule(
+            prompt=prompt,
+            current_code=current_code,
+            input_preview=preview,
+        )
+    except AssistantServiceError as exc:  # pragma: no cover
+        return jsonify({"error": str(exc)}), 502
+
+    return jsonify(result)
+
+
 @api_bp.post("/pipeline/run")
 def run_pipeline() -> Response:
     results = run_full_pipeline(current_app.config_obj)
@@ -215,6 +275,40 @@ def query_table() -> Response:
         result = run_sql_query(Path(current_app.config["DATABASE_PATH"]), query)
     except Exception as exc:  # pragma: no cover
         return jsonify({"error": str(exc)}), 400
+
+    return jsonify(result)
+
+
+@api_bp.post("/assistants/tables")
+def assist_sql_query() -> Response:
+    service = current_app.extensions.get(ASSISTANT_EXTENSION_KEY)
+    if service is None:
+        return jsonify({"error": "Assistant service is not configured"}), 503
+
+    payload = request.get_json(force=True)
+    prompt = (payload.get("prompt") or "").strip()
+    if not prompt:
+        return jsonify({"error": "Prompt is required"}), 400
+
+    table_name = (payload.get("table_name") or "").strip() or None
+    schema_description = ""
+    sample_rows = ""
+    if table_name:
+        tables = fetch_table_list(Path(current_app.config["DATABASE_PATH"]))
+        table_info = next((item for item in tables if item["table_name"] == table_name), None)
+        if table_info:
+            schema_description = ", ".join(table_info.get("columns", []))
+            sample_rows = json.dumps(table_info.get("preview", [])[:3], indent=2)
+
+    try:
+        result = service.suggest_sql(
+            prompt=prompt,
+            table_name=table_name,
+            schema_description=schema_description,
+            sample_rows=sample_rows,
+        )
+    except AssistantServiceError as exc:  # pragma: no cover
+        return jsonify({"error": str(exc)}), 502
 
     return jsonify(result)
 
@@ -255,4 +349,13 @@ def get_workflows() -> Response:
 @api_bp.get("/automations")
 def get_automations() -> Response:
     return jsonify({"status": "work in progress"})
+
+
+def _truncate_json(payload: Any, limit: int = 4000) -> str:
+    """Render JSON payloads while keeping prompts below token limits."""
+
+    rendered = json.dumps(payload, indent=2, sort_keys=True)
+    if len(rendered) <= limit:
+        return rendered
+    return rendered[: limit - 3] + "..."
 

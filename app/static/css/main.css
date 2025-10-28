@@ -195,6 +195,11 @@ button.secondary {
   transition: opacity 0.2s ease;
 }
 
+button.loading {
+  opacity: 0.6;
+  cursor: wait;
+}
+
 button.primary:hover,
 button.secondary:hover {
   opacity: 0.9;
@@ -256,6 +261,52 @@ button.secondary:hover {
 
 .right-pane-block h4 {
   margin-bottom: 0.5rem;
+}
+
+.assistant-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.mode-toggle {
+  display: inline-flex;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(17, 24, 39, 0.9);
+}
+
+.toggle-button {
+  background: transparent;
+  border: none;
+  color: inherit;
+  font-size: 0.85rem;
+  padding: 0.35rem 0.9rem;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: background 0.2s ease, opacity 0.2s ease;
+}
+
+.toggle-button.active {
+  background: rgba(59, 130, 246, 0.2);
+  opacity: 1;
+}
+
+.toggle-button:hover {
+  opacity: 1;
+}
+
+.assistant-output {
+  margin-top: 0.75rem;
+  min-height: 3rem;
+  white-space: pre-wrap;
+}
+
+.hidden {
+  display: none !important;
 }
 
 .chip-list {
