@@ -34,7 +34,6 @@ class AssistantService:
         try:
             response = self.client.chat.completions.create(
                 model=self.deployment,
-                temperature=0.15,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
