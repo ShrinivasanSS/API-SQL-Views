@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict
 
 import jq
 from flask import Blueprint, Response, current_app, jsonify, render_template, request
+from werkzeug.datastructures import FileStorage
+from werkzeug.utils import secure_filename
 
 from .ai import AGENT_MANAGER_EXTENSION_KEY, AgentExecutionError
 from .assistants import ASSISTANT_EXTENSION_KEY, AssistantServiceError
@@ -21,6 +23,13 @@ SAMPLE_INPUTS = PROJECT_ROOT / "sample_inputs"
 RULES_DIR = PROJECT_ROOT / "sample_transformation_rules"
 USER_RULES_DIR = PROJECT_ROOT / "storage" / "user_rules"
 USER_RULES_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _relative_path(path: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(PROJECT_ROOT))
+    except ValueError:
+        return str(path.resolve())
 
 
 def _rule_by_name(name: str) -> PipelineRule | None:
@@ -419,6 +428,94 @@ def list_blueprints() -> Response:
     ]
     items.sort(key=lambda item: item["entity_type"].lower())
     return jsonify(items)
+
+
+@api_bp.post("/uploads")
+def upload_assets() -> Response:
+    if not request.files:
+        return jsonify({"error": "No files were uploaded"}), 400
+
+    uploads_dir = Path(current_app.config["UPLOADS_DIR"])
+    cache_dir = Path(current_app.config["CACHE_DIR"])
+    uploads_dir.mkdir(parents=True, exist_ok=True)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    registry = current_app.config_obj.blueprint_registry
+    saved_blueprints: list[Dict[str, Any]] = []
+    saved_payloads: list[Dict[str, Any]] = []
+    skipped: list[Dict[str, Any]] = []
+    errors: list[Dict[str, Any]] = []
+
+    files: list[FileStorage] = request.files.getlist("files")
+    if not files:
+        return jsonify({"error": "No files were uploaded"}), 400
+
+    for file_storage in files:
+        original_name = file_storage.filename or ""
+        filename = secure_filename(original_name)
+        if not filename:
+            skipped.append({"filename": original_name, "reason": "Filename is required"})
+            continue
+
+        suffix = Path(filename).suffix.lower()
+        target_dir: Path | None
+        if suffix in {".yaml", ".yml"}:
+            target_dir = uploads_dir
+        elif suffix == ".json":
+            target_dir = cache_dir
+        else:
+            skipped.append({
+                "filename": filename,
+                "reason": "Unsupported file type",
+            })
+            continue
+
+        destination = (target_dir / filename).resolve()
+        try:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            file_storage.save(destination)
+        except OSError as exc:
+            errors.append({"filename": filename, "reason": str(exc)})
+            continue
+
+        if suffix in {".yaml", ".yml"}:
+            result = registry.register_uploaded_blueprint(destination)
+            status = result.get("status")
+            if status == "error":
+                errors.append({"filename": filename, **result})
+                continue
+            if status in {"skipped", "unchanged"}:
+                skipped.append({"filename": filename, **result})
+            else:
+                saved_blueprints.append({"filename": filename, **result})
+        else:
+            saved_payloads.append(
+                {
+                    "filename": filename,
+                    "path": _relative_path(destination),
+                    "status": "saved",
+                }
+            )
+
+    # Ensure the registry picks up any other blueprints that may have been added.
+    registry.refresh_uploaded_blueprints()
+    current_app.config["BLUEPRINTS"] = registry.describe()
+    base_rules = [rule.to_metadata() for rule in current_app.config_obj.pipeline_rules]
+    current_app.config["PIPELINE_RULES"] = [
+        *base_rules,
+        *registry.list_source_rules(),
+    ]
+
+    response = {
+        "status": "ok",
+        "blueprints": saved_blueprints,
+        "payloads": saved_payloads,
+        "skipped": skipped,
+        "errors": errors,
+        "cache_dir": _relative_path(cache_dir),
+        "uploads_dir": _relative_path(uploads_dir),
+    }
+    return jsonify(response)
 
 
 @api_bp.get("/blueprints/<string:entity_type>")

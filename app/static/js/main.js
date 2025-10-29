@@ -811,8 +811,8 @@ async function askSqlAssistant() {
   }
 }
 
-async function ensureBlueprintsLoaded() {
-  if (state.blueprints !== null) {
+async function ensureBlueprintsLoaded(force = false) {
+  if (!force && state.blueprints !== null) {
     return;
   }
   try {
@@ -864,13 +864,41 @@ async function renderBlueprintsView() {
   setViewHeader("blueprints");
   await ensureBlueprintsLoaded();
 
+  renderBlueprintCatalogue();
+  renderBlueprintDetailPane();
+}
+
+function renderBlueprintCatalogue() {
   const list = state.blueprints || [];
-  if (!list.length) {
-    contentPane().innerHTML = `<p class="muted">No blueprints registered yet.</p>`;
-  } else {
-    const cards = list.map(blueprintCardMarkup).join("");
-    contentPane().innerHTML = `<div class="card-column">${cards}</div>`;
-  }
+  const cards = list.map(blueprintCardMarkup).join("");
+  const uploadCard = `
+    <div class="card blueprint-upload-card">
+      <div class="space-between">
+        <div>
+          <h3>Upload blueprints or cached payloads</h3>
+          <p class="muted text-xs">
+            YAML files are stored in <code>.uploads</code> and JSON payloads in <code>.cache</code>.
+          </p>
+        </div>
+      </div>
+      <div class="stack gap-sm">
+        <input type="file" id="blueprint-upload-input" multiple accept=".yaml,.yml,.json" />
+        <div class="space-between align-center">
+          <button class="primary" id="blueprint-upload-button">Upload</button>
+          <span class="muted text-xs" id="blueprint-upload-status"></span>
+        </div>
+        <p class="muted text-xs">
+          After uploading, rerun the ETL pipeline so new tables appear in the demo database.
+        </p>
+      </div>
+    </div>
+  `;
+
+  const emptyState = list.length
+    ? ""
+    : '<p class="muted">No blueprints registered yet.</p>';
+
+  contentPane().innerHTML = `<div class="card-column">${uploadCard}${cards}${emptyState}</div>`;
 
   contentPane()
     .querySelectorAll(".card[data-blueprint]")
@@ -882,7 +910,86 @@ async function renderBlueprintsView() {
       );
     });
 
-  renderBlueprintDetailPane();
+  initBlueprintUploadControls();
+}
+
+function initBlueprintUploadControls() {
+  const input = document.getElementById("blueprint-upload-input");
+  const button = document.getElementById("blueprint-upload-button");
+  const status = document.getElementById("blueprint-upload-status");
+  if (!input || !button) {
+    return;
+  }
+
+  const setStatus = (message, isError = false) => {
+    if (!status) {
+      return;
+    }
+    status.textContent = message;
+    status.classList.toggle("text-error", Boolean(isError && message));
+    status.classList.toggle("text-success", Boolean(!isError && message));
+  };
+
+  button.addEventListener("click", async () => {
+    const files = Array.from(input.files || []);
+    if (!files.length) {
+      setStatus("Choose one or more YAML/JSON files to upload.", true);
+      return;
+    }
+
+    const formData = new FormData();
+    files.forEach((file) => formData.append("files", file));
+
+    button.disabled = true;
+    setStatus("Uploading…");
+
+    try {
+      const res = await fetch("/api/uploads", {
+        method: "POST",
+        body: formData,
+      });
+      const payload = await res.json();
+      if (!res.ok) {
+        throw new Error(payload.error || `Upload failed with status ${res.status}`);
+      }
+
+      const added = (payload.blueprints || []).length;
+      const cached = (payload.payloads || []).length;
+      const skipped = (payload.skipped || []).length;
+      const errors = (payload.errors || []).length;
+
+      const sections = [];
+      if (added) {
+        sections.push(`${added} blueprint${added === 1 ? "" : "s"} saved to ${payload.uploads_dir || ".uploads"}.`);
+      }
+      if (cached) {
+        sections.push(`${cached} JSON payload${cached === 1 ? "" : "s"} cached in ${payload.cache_dir || ".cache"}.`);
+      }
+      if (skipped) {
+        sections.push(`${skipped} file${skipped === 1 ? " was" : "s were"} skipped.`);
+      }
+      if (errors) {
+        sections.push(`${errors} upload error${errors === 1 ? "" : "s"} encountered.`);
+      }
+
+      setStatus(sections.join(" ") || "Upload completed.", errors > 0);
+      showPipelineStatus("Uploads processed. Rerun the ETL pipeline to load new tables.");
+
+      state.blueprints = null;
+      state.blueprintDetails = {};
+      state.selectedBlueprint = null;
+      state.selectedBlueprintTable = null;
+      await ensureBlueprintsLoaded(true);
+      renderBlueprintCatalogue();
+      renderBlueprintDetailPane();
+    } catch (err) {
+      setStatus(err.message, true);
+      showPipelineStatus(`Upload failed: ${err.message}`, true);
+    } finally {
+      button.disabled = false;
+      input.value = "";
+    }
+  });
 }
 
 async function selectBlueprint(entityType, element) {

@@ -100,15 +100,30 @@ class Blueprint:
 class BlueprintRegistry:
     """Load and cache blueprints declared in the registry file."""
 
-    def __init__(self, project_root: Path, mapping: Dict[str, Path]):
+    def __init__(
+        self,
+        project_root: Path,
+        mapping: Dict[str, Path],
+        *,
+        uploads_dir: Path | None = None,
+    ):
         self.project_root = project_root
+        self.uploads_dir = uploads_dir.resolve() if uploads_dir else project_root / ".uploads"
         self._mapping = mapping
         self._cache: Dict[str, Blueprint] = {}
 
     @classmethod
-    def from_csv(cls, registry_path: Path, *, project_root: Path) -> "BlueprintRegistry":
+    def from_csv(
+        cls,
+        registry_path: Path,
+        *,
+        project_root: Path,
+        uploads_dir: Path | None = None,
+    ) -> "BlueprintRegistry":
         if not registry_path.exists():
-            return cls(project_root, {})
+            registry = cls(project_root, {}, uploads_dir=uploads_dir)
+            registry._merge_upload_directory()
+            return registry
 
         mapping: Dict[str, Path] = {}
         with registry_path.open(newline="", encoding="utf-8") as fh:
@@ -120,7 +135,9 @@ class BlueprintRegistry:
                     continue
                 path = (registry_path.parent / blueprint_file).resolve()
                 mapping[entity_type] = path
-        return cls(project_root, mapping)
+        registry = cls(project_root, mapping, uploads_dir=uploads_dir)
+        registry._merge_upload_directory()
+        return registry
 
     def is_empty(self) -> bool:
         return not self._mapping
@@ -186,6 +203,57 @@ class BlueprintRegistry:
                 metadata.append(table.to_metadata(self.project_root, entity_type=entity_type))
         return metadata
 
+    # ------------------------------------------------------------------
+    # Upload integration
+    # ------------------------------------------------------------------
+
+    def register_uploaded_blueprint(self, path: Path) -> Dict[str, Any]:
+        """Register or refresh a blueprint stored in the uploads directory."""
+
+        result: Dict[str, Any] = {
+            "path": self._relative(path),
+            "status": "skipped",
+            "entity_type": None,
+            "reason": None,
+        }
+
+        try:
+            entity_type = self._extract_entity_type(path)
+        except (yaml.YAMLError, OSError, ValueError) as exc:
+            result["reason"] = str(exc)
+            result["status"] = "error"
+            return result
+
+        result["entity_type"] = entity_type
+        existing = self._mapping.get(entity_type)
+        if existing is not None and not self._is_uploaded_path(existing):
+            result["status"] = "skipped"
+            result["reason"] = "Entity type is already provided by the registry"
+            return result
+
+        resolved = path.resolve()
+        if existing is None:
+            status = "added"
+        elif resolved != existing.resolve():
+            status = "updated"
+        else:
+            status = "unchanged"
+
+        self._mapping[entity_type] = resolved
+        self._cache.pop(entity_type, None)
+        result["status"] = status
+        result["reason"] = None
+        return result
+
+    def refresh_uploaded_blueprints(self) -> None:
+        """Rescan the uploads directory for new blueprints."""
+
+        self._merge_upload_directory()
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
     def get(self, entity_type: str) -> Blueprint | None:
         key = (entity_type or "").strip()
         if not key:
@@ -197,9 +265,42 @@ class BlueprintRegistry:
             self._cache[key] = self._load_blueprint(path)
         return self._cache[key]
 
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
+    def _merge_upload_directory(self) -> None:
+        directory = self.uploads_dir
+        if not directory.exists() or not directory.is_dir():
+            return
+
+        candidates = sorted(directory.rglob("*.y?ml"))
+        for path in candidates:
+            if path.is_file():
+                self.register_uploaded_blueprint(path)
+
+    def _extract_entity_type(self, path: Path) -> str:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        if not isinstance(data, Mapping):
+            raise ValueError("Blueprint must be a mapping")
+
+        entity_section = data.get("entity") or {}
+        entity_data: Mapping[str, Any]
+        if isinstance(entity_section, Mapping):
+            entity_data = entity_section
+        elif isinstance(entity_section, Sequence) and entity_section:
+            first = entity_section[0]
+            entity_data = first if isinstance(first, Mapping) else {}
+        else:
+            entity_data = {}
+
+        entity_type = str(entity_data.get("type") or path.stem).strip()
+        if not entity_type:
+            raise ValueError("Blueprint entity type could not be determined")
+        return entity_type
+
+    def _is_uploaded_path(self, path: Path) -> bool:
+        try:
+            path.resolve().relative_to(self.uploads_dir.resolve())
+        except ValueError:
+            return False
+        return True
     def _table_summary(
         self, table: BlueprintTable, *, entity_type: str
     ) -> Dict[str, Any]:
