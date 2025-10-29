@@ -476,7 +476,7 @@ async function renderRulesView() {
       </div>
       <div data-mode-panel="code">
         <textarea id="rule-preview-content" placeholder="Paste a rule snippet or edit an existing rule."></textarea>
-        <input type="text" id="rule-preview-input" placeholder="Relative input path (e.g. sample_inputs/entities/api_current_status.json)" />
+        <input type="text" id="rule-preview-input" placeholder="Relative input path (e.g. examples/inputs/entities/api_current_status.json)" />
         <div class="flex">
           <button class="primary" id="run-rule-preview">Preview</button>
           <button class="secondary" id="save-rule">Save as New Rule</button>

@@ -11,14 +11,19 @@ from flask import Blueprint, Response, current_app, jsonify, render_template, re
 
 from .ai import AGENT_MANAGER_EXTENSION_KEY, AgentExecutionError
 from .assistants import ASSISTANT_EXTENSION_KEY, AssistantServiceError
-from .config import PROJECT_ROOT, PipelineRule
+from .config import EXAMPLES_DIR, PROJECT_ROOT, PipelineRule
 from .pipeline import execute_rule, fetch_table_list, load_json_payload, run_full_pipeline
 from .pipeline import run_sql_query
 from .utils import load_json, preview_json, safe_resolve
 
 
-SAMPLE_INPUTS = PROJECT_ROOT / "sample_inputs"
-RULES_DIR = PROJECT_ROOT / "sample_transformation_rules"
+_EXAMPLE_INPUTS = EXAMPLES_DIR / "inputs"
+_LEGACY_SAMPLE_INPUTS = PROJECT_ROOT / "sample_inputs"
+SAMPLE_INPUTS = _EXAMPLE_INPUTS if _EXAMPLE_INPUTS.exists() else _LEGACY_SAMPLE_INPUTS
+
+_EXAMPLE_RULES = EXAMPLES_DIR / "transformation_rules"
+_LEGACY_RULES = PROJECT_ROOT / "sample_transformation_rules"
+RULES_DIR = _EXAMPLE_RULES if _EXAMPLE_RULES.exists() else _LEGACY_RULES
 USER_RULES_DIR = PROJECT_ROOT / "storage" / "user_rules"
 USER_RULES_DIR.mkdir(parents=True, exist_ok=True)
 

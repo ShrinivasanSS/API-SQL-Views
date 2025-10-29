@@ -22,5 +22,6 @@
   - `app/routes.py` serves HTML + API endpoints.
   - `app/static/` contains the UI (CSS/JS) and templates live in `app/templates/`.
 - `blueprints/` stores registry CSV + YAML definitions.
-- `sample_inputs/`, `sample_transformation_rules/`, and `storage/` provide demo data, rules, and generated artefacts.
+- `examples/` hosts demo payloads, rules, and outputs under `inputs/`, `transformation_rules/`, `outputs/`, and `source_rules/`.
+- `storage/` provides generated artefacts such as the SQLite database and user-authored rules.
 - `agents/[DONE]-Phase-*.md` capture completed phase requirements; update this `AGENTS.md` as checkpoints evolve.
