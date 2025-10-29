@@ -23,6 +23,8 @@ const state = {
     rules: "code",
     tables: "code",
   },
+  aiTaskMode: "query",
+  aiWorkflowMode: "query",
 };
 
 function escapeHtml(value) {
@@ -62,18 +64,55 @@ function renderRowsTable(rows, columns = []) {
 function renderSqlStep(step) {
   const title = escapeHtml(step.title || "Step");
   const rowcount = typeof step.rowcount === "number" ? step.rowcount : 0;
-  let body = '<p class="muted">No output.</p>';
+  const executedSql = step.sql || step.executed_sql || "";
+  const generatedSql =
+    step.generated_sql || (step.ai && step.ai.generated_sql) || "";
+  const aiNotes = (step.ai && step.ai.notes) || step.ai_notes || "";
+  const fallbackReason =
+    step.ai && step.ai.used_fallback ? step.ai.fallback_reason : null;
+  const summaryLine = step.summary
+    ? `<p class="muted text-xs">Summary: ${escapeHtml(step.summary)}</p>`
+    : "";
+
+  let resultBlock = '<p class="muted">No output.</p>';
   if (step.error) {
-    body = `<p class="text-error">${escapeHtml(step.error)}</p>`;
+    resultBlock = `<p class="text-error">${escapeHtml(step.error)}</p>`;
   } else if (Array.isArray(step.rows) && step.rows.length) {
     if (typeof step.rows[0] === "object" && step.rows[0] !== null) {
-      body = renderRowsTable(step.rows, step.columns || []);
+      resultBlock = renderRowsTable(step.rows, step.columns || []);
     } else {
-      body = `<pre>${escapeHtml(
-        JSON.stringify(step.rows, null, 2)
-      )}</pre>`;
+      resultBlock = `<pre>${escapeHtml(JSON.stringify(step.rows, null, 2))}</pre>`;
     }
   }
+
+  const sqlDetails = [];
+  if (executedSql) {
+    sqlDetails.push(
+      `<details class="sql-preview"><summary>Executed SQL</summary><pre>${escapeHtml(
+        executedSql
+      )}</pre></details>`
+    );
+  }
+  if (generatedSql && generatedSql !== executedSql) {
+    sqlDetails.push(
+      `<details class="sql-preview"><summary>AI Suggested SQL</summary><pre>${escapeHtml(
+        generatedSql
+      )}</pre></details>`
+    );
+  }
+
+  const notesBlock = aiNotes
+    ? `<p class="muted text-xs">${escapeHtml(aiNotes)}</p>`
+    : "";
+  const fallbackBlock = fallbackReason
+    ? `<p class="text-error text-xs">AI fallback: ${escapeHtml(
+        fallbackReason
+      )}</p>`
+    : "";
+
+  const body = [summaryLine, fallbackBlock, notesBlock, sqlDetails.join(""), resultBlock]
+    .filter(Boolean)
+    .join("");
   return `
     <div class="ai-step-card">
       <div class="ai-step-header">
@@ -1244,6 +1283,10 @@ async function renderAiTaskDetailPane() {
     return;
   }
 
+  if (!state.tables.length) {
+    await ensureTablesLoaded();
+  }
+
   let task;
   try {
     task = await loadAiTaskDetails(state.selectedTask);
@@ -1252,7 +1295,12 @@ async function renderAiTaskDetailPane() {
     return;
   }
 
+  const tableNames = Array.isArray(state.tables)
+    ? state.tables.map((table) => table.table_name).sort((a, b) => a.localeCompare(b))
+    : [];
+  const mode = state.aiTaskMode || "query";
   const lastRun = state.aiTaskRuns[state.selectedTask];
+  const normaliseId = (value) => String(value || "").replace(/[^a-zA-Z0-9_-]/g, "-");
   const inputHtml = (task.inputs || [])
     .map((field) => {
       const value = lastRun?.inputs?.[field.name] ?? field.default ?? "";
@@ -1262,6 +1310,29 @@ async function renderAiTaskDetailPane() {
       const description = field.description
         ? `<p class="muted text-xs">${escapeHtml(field.description)}</p>`
         : "";
+      const isTableField = /_table$/i.test(field.name);
+      if (isTableField) {
+        const datalistId = `task-${normaliseId(state.selectedTask)}-${normaliseId(
+          field.name
+        )}`;
+        const options = new Set(tableNames);
+        if (value) {
+          options.add(value);
+        }
+        const optionsHtml = Array.from(options)
+          .sort((a, b) => a.localeCompare(b))
+          .map((name) => `<option value="${escapeHtml(name)}"></option>`)
+          .join("");
+        return `
+          <label class="input-block">
+            <span class="input-label">${escapeHtml(field.label || field.name)}</span>
+            <input class="input-text" data-input="${escapeHtml(
+              field.name
+            )}" list="${escapeHtml(datalistId)}" value="${escapeHtml(value)}"${placeholder} />
+            <datalist id="${escapeHtml(datalistId)}">${optionsHtml}</datalist>
+            ${description}
+          </label>`;
+      }
       return `
         <label class="input-block">
           <span class="input-label">${escapeHtml(field.label || field.name)}</span>
@@ -1277,14 +1348,24 @@ async function renderAiTaskDetailPane() {
 
   container.innerHTML = `
     <div class="right-pane-block">
-      <h4>${escapeHtml(task.title || task.name)}</h4>
+      <div class="assistant-header">
+        <h4>${escapeHtml(task.title || task.name)}</h4>
+        <div class="mode-toggle">
+          <button type="button" class="toggle-button${
+            mode === "query" ? " active" : ""
+          }" data-ai-task-mode="query">Query mode</button>
+          <button type="button" class="toggle-button${
+            mode === "ai" ? " active" : ""
+          }" data-ai-task-mode="ai">AI mode</button>
+        </div>
+      </div>
       <p class="muted">${escapeHtml(task.description || "")}</p>
     </div>
     <div class="right-pane-block">
       <h5>Inputs</h5>
       <div class="form-stack">${inputHtml || '<p class="muted">No inputs required.</p>'}</div>
     </div>
-    <div class="right-pane-block">
+    <div class="right-pane-block${mode === "query" ? " hidden" : ""}" data-role="ai-instructions">
       <h5>Instructions</h5>
       <textarea class="instructions-scroll" data-role="instructions">${escapeHtml(
         instructions
@@ -1292,8 +1373,15 @@ async function renderAiTaskDetailPane() {
       <p class="muted text-xs">Edits are temporary for experimentation.</p>
     </div>
     <div class="right-pane-actions">
-      <button class="primary" id="run-ai-task">Run Task</button>
+      <button class="primary" id="run-ai-task">${
+        mode === "ai" ? "Run with AI" : "Run default query"
+      }</button>
       <div class="muted text-xs" id="ai-task-status"></div>
+      <div class="muted text-xs" id="ai-task-fallback"></div>
+    </div>
+    <div class="right-pane-block">
+      <h5>${mode === "ai" ? "AI Summary" : "Result Summary"}</h5>
+      <div id="ai-task-summary" class="ai-summary muted">Run the task to generate a summary.</div>
     </div>
     <div class="right-pane-block">
       <h5>Execution Steps</h5>
@@ -1305,6 +1393,16 @@ async function renderAiTaskDetailPane() {
     </div>
   `;
 
+  container.querySelectorAll("[data-ai-task-mode]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const selected = btn.dataset.aiTaskMode || "query";
+      if (state.aiTaskMode !== selected) {
+        state.aiTaskMode = selected;
+        void renderAiTaskDetailPane();
+      }
+    });
+  });
+
   const runButton = document.getElementById("run-ai-task");
   if (runButton) {
     runButton.addEventListener("click", async () => {
@@ -1312,17 +1410,23 @@ async function renderAiTaskDetailPane() {
       container.querySelectorAll("[data-input]").forEach((el) => {
         formInputs[el.dataset.input] = el.value;
       });
-      const instructionsValue = container.querySelector(
-        '[data-role="instructions"]'
-      )?.value;
-      await executeAiTaskRun(task.name, formInputs, instructionsValue || "");
+      const instructionsValue =
+        mode === "ai"
+          ? container.querySelector('[data-role="instructions"]')?.value
+          : "";
+      await executeAiTaskRun(
+        task.name,
+        formInputs,
+        instructionsValue || "",
+        mode
+      );
     });
   }
 
   renderAiTaskResults(state.selectedTask);
 }
 
-async function executeAiTaskRun(name, inputs, instructions) {
+async function executeAiTaskRun(name, inputs, instructions, mode) {
   const statusEl = document.getElementById("ai-task-status");
   const runButton = document.getElementById("run-ai-task");
   if (statusEl) {
@@ -1338,14 +1442,14 @@ async function executeAiTaskRun(name, inputs, instructions) {
     const res = await fetch(`/api/ai-tasks/${encodeURIComponent(name)}/execute`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ inputs, instructions }),
+      body: JSON.stringify({ inputs, instructions, mode }),
     });
     if (!res.ok) {
       const payload = await res.json().catch(() => ({}));
       throw new Error(payload.error || `Task ${name} failed to execute`);
     }
     const data = await res.json();
-    state.aiTaskRuns[name] = { inputs, response: data };
+    state.aiTaskRuns[name] = { inputs, response: data, mode };
     if (statusEl) {
       statusEl.textContent = "Execution completed.";
       statusEl.classList.add("text-success");
@@ -1367,6 +1471,8 @@ async function executeAiTaskRun(name, inputs, instructions) {
 function renderAiTaskResults(name) {
   const stepsContainer = document.getElementById("ai-task-steps");
   const outputContainer = document.getElementById("ai-task-output");
+  const summaryContainer = document.getElementById("ai-task-summary");
+  const fallbackContainer = document.getElementById("ai-task-fallback");
   if (!stepsContainer || !outputContainer) {
     return;
   }
@@ -1374,10 +1480,34 @@ function renderAiTaskResults(name) {
   if (!run || !run.response) {
     stepsContainer.innerHTML = '<p class="muted">Run the task to see execution details.</p>';
     outputContainer.innerHTML = '<p class="muted">No output yet.</p>';
+    if (summaryContainer) {
+      summaryContainer.textContent = "Run the task to generate a summary.";
+      summaryContainer.classList.add("muted");
+    }
+    if (fallbackContainer) {
+      fallbackContainer.textContent = "";
+      fallbackContainer.classList.remove("text-error");
+    }
     return;
   }
   stepsContainer.innerHTML = renderSqlStepList(run.response.steps || []);
   outputContainer.innerHTML = renderOutputBlock(run.response.output);
+  if (summaryContainer) {
+    const summaryText = run.response.summary || "No summary produced.";
+    summaryContainer.innerHTML = `<pre>${escapeHtml(summaryText)}</pre>`;
+    summaryContainer.classList.toggle("muted", !run.response.summary);
+  }
+  if (fallbackContainer) {
+    const fallbackMessages =
+      (run.response.ai && run.response.ai.fallback_messages) || [];
+    if (Array.isArray(fallbackMessages) && fallbackMessages.length) {
+      fallbackContainer.textContent = fallbackMessages.join(" ");
+      fallbackContainer.classList.add("text-error");
+    } else {
+      fallbackContainer.textContent = "";
+      fallbackContainer.classList.remove("text-error");
+    }
+  }
 }
 
 async function ensureAiWorkflowsLoaded() {
@@ -1486,6 +1616,10 @@ async function renderAiWorkflowDetailPane() {
     return;
   }
 
+  if (!state.tables.length) {
+    await ensureTablesLoaded();
+  }
+
   let workflow;
   try {
     workflow = await loadAiWorkflowDetails(state.selectedWorkflow);
@@ -1494,7 +1628,12 @@ async function renderAiWorkflowDetailPane() {
     return;
   }
 
+  const mode = state.aiWorkflowMode || "query";
+  const tableNames = Array.isArray(state.tables)
+    ? state.tables.map((table) => table.table_name).sort((a, b) => a.localeCompare(b))
+    : [];
   const lastRun = state.aiWorkflowRuns[state.selectedWorkflow];
+  const normaliseId = (value) => String(value || "").replace(/[^a-zA-Z0-9_-]/g, "-");
   const inputHtml = (workflow.inputs || [])
     .map((field) => {
       const value = lastRun?.inputs?.[field.name] ?? field.default ?? "";
@@ -1504,6 +1643,29 @@ async function renderAiWorkflowDetailPane() {
       const description = field.description
         ? `<p class="muted text-xs">${escapeHtml(field.description)}</p>`
         : "";
+      const isTableField = /_table$/i.test(field.name);
+      if (isTableField) {
+        const datalistId = `workflow-${normaliseId(state.selectedWorkflow)}-${normaliseId(
+          field.name
+        )}`;
+        const options = new Set(tableNames);
+        if (value) {
+          options.add(value);
+        }
+        const optionsHtml = Array.from(options)
+          .sort((a, b) => a.localeCompare(b))
+          .map((name) => `<option value="${escapeHtml(name)}"></option>`)
+          .join("");
+        return `
+          <label class="input-block">
+            <span class="input-label">${escapeHtml(field.label || field.name)}</span>
+            <input class="input-text" data-workflow-input="${escapeHtml(
+              field.name
+            )}" list="${escapeHtml(datalistId)}" value="${escapeHtml(value)}"${placeholder} />
+            <datalist id="${escapeHtml(datalistId)}">${optionsHtml}</datalist>
+            ${description}
+          </label>`;
+      }
       return `
         <label class="input-block">
           <span class="input-label">${escapeHtml(field.label || field.name)}</span>
@@ -1517,14 +1679,24 @@ async function renderAiWorkflowDetailPane() {
 
   container.innerHTML = `
     <div class="right-pane-block">
-      <h4>${escapeHtml(workflow.title || workflow.name)}</h4>
+      <div class="assistant-header">
+        <h4>${escapeHtml(workflow.title || workflow.name)}</h4>
+        <div class="mode-toggle">
+          <button type="button" class="toggle-button${
+            mode === "query" ? " active" : ""
+          }" data-ai-workflow-mode="query">Query mode</button>
+          <button type="button" class="toggle-button${
+            mode === "ai" ? " active" : ""
+          }" data-ai-workflow-mode="ai">AI mode</button>
+        </div>
+      </div>
       <p class="muted">${escapeHtml(workflow.description || "")}</p>
     </div>
     <div class="right-pane-block">
       <h5>Inputs</h5>
       <div class="form-stack">${inputHtml || '<p class="muted">No inputs required.</p>'}</div>
     </div>
-    <div class="right-pane-block">
+    <div class="right-pane-block${mode === "query" ? " hidden" : ""}" data-role="ai-workflow-instructions">
       <h5>Instructions</h5>
       <textarea class="instructions-scroll" data-workflow-instructions>${escapeHtml(
         workflow.instructions || ""
@@ -1532,18 +1704,31 @@ async function renderAiWorkflowDetailPane() {
       <p class="muted text-xs">Edits are temporary for experimentation.</p>
     </div>
     <div class="right-pane-actions">
-      <button class="primary" id="run-ai-workflow">Run Workflow</button>
+      <button class="primary" id="run-ai-workflow">${
+        mode === "ai" ? "Run with AI" : "Run default workflow"
+      }</button>
       <div class="muted text-xs" id="ai-workflow-status"></div>
+      <div class="muted text-xs" id="ai-workflow-fallback"></div>
     </div>
     <div class="right-pane-block">
-      <h5>Summary</h5>
-      <div id="ai-workflow-summary"></div>
+      <h5>${mode === "ai" ? "AI Summary" : "Summary"}</h5>
+      <div id="ai-workflow-summary" class="ai-summary muted">Run the workflow to generate a summary.</div>
     </div>
     <div class="right-pane-block">
       <h5>Task Executions</h5>
       <div id="ai-workflow-steps" class="ai-steps-container"></div>
     </div>
   `;
+
+  container.querySelectorAll("[data-ai-workflow-mode]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const selected = btn.dataset.aiWorkflowMode || "query";
+      if (state.aiWorkflowMode !== selected) {
+        state.aiWorkflowMode = selected;
+        void renderAiWorkflowDetailPane();
+      }
+    });
+  });
 
   const runButton = document.getElementById("run-ai-workflow");
   if (runButton) {
@@ -1552,13 +1737,15 @@ async function renderAiWorkflowDetailPane() {
       container.querySelectorAll("[data-workflow-input]").forEach((el) => {
         inputs[el.dataset.workflowInput] = el.value;
       });
-      const instructionsValue = container.querySelector(
-        "[data-workflow-instructions]"
-      )?.value;
+      const instructionsValue =
+        mode === "ai"
+          ? container.querySelector("[data-workflow-instructions]")?.value
+          : "";
       await executeAiWorkflowRun(
         workflow.name,
         inputs,
-        instructionsValue || ""
+        instructionsValue || "",
+        mode
       );
     });
   }
@@ -1566,7 +1753,7 @@ async function renderAiWorkflowDetailPane() {
   renderAiWorkflowResults(state.selectedWorkflow);
 }
 
-async function executeAiWorkflowRun(name, inputs, instructions) {
+async function executeAiWorkflowRun(name, inputs, instructions, mode) {
   const statusEl = document.getElementById("ai-workflow-status");
   const runButton = document.getElementById("run-ai-workflow");
   if (statusEl) {
@@ -1584,7 +1771,7 @@ async function executeAiWorkflowRun(name, inputs, instructions) {
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ inputs, instructions }),
+        body: JSON.stringify({ inputs, instructions, mode }),
       }
     );
     if (!res.ok) {
@@ -1592,7 +1779,7 @@ async function executeAiWorkflowRun(name, inputs, instructions) {
       throw new Error(payload.error || `Workflow ${name} failed to execute`);
     }
     const data = await res.json();
-    state.aiWorkflowRuns[name] = { inputs, response: data };
+    state.aiWorkflowRuns[name] = { inputs, response: data, mode };
     if (statusEl) {
       statusEl.textContent = "Execution completed.";
       statusEl.classList.add("text-success");
@@ -1614,18 +1801,35 @@ async function executeAiWorkflowRun(name, inputs, instructions) {
 function renderAiWorkflowResults(name) {
   const summaryContainer = document.getElementById("ai-workflow-summary");
   const stepsContainer = document.getElementById("ai-workflow-steps");
+  const fallbackContainer = document.getElementById("ai-workflow-fallback");
   if (!summaryContainer || !stepsContainer) {
     return;
   }
   const run = state.aiWorkflowRuns[name];
   if (!run || !run.response) {
-    summaryContainer.innerHTML = '<p class="muted">Run the workflow to generate a summary.</p>';
+    summaryContainer.textContent = "Run the workflow to generate a summary.";
+    summaryContainer.classList.add("muted");
     stepsContainer.innerHTML = '<p class="muted">No task executions yet.</p>';
+    if (fallbackContainer) {
+      fallbackContainer.textContent = "";
+      fallbackContainer.classList.remove("text-error");
+    }
     return;
   }
-  summaryContainer.innerHTML = `<pre>${escapeHtml(
-    run.response.summary || "No summary produced."
-  )}</pre>`;
+  const summaryText = run.response.summary || "No summary produced.";
+  summaryContainer.innerHTML = `<pre>${escapeHtml(summaryText)}</pre>`;
+  summaryContainer.classList.toggle("muted", !run.response.summary);
+  if (fallbackContainer) {
+    const fallbackMessages =
+      (run.response.ai && run.response.ai.fallback_messages) || [];
+    if (Array.isArray(fallbackMessages) && fallbackMessages.length) {
+      fallbackContainer.textContent = fallbackMessages.join(" ");
+      fallbackContainer.classList.add("text-error");
+    } else {
+      fallbackContainer.textContent = "";
+      fallbackContainer.classList.remove("text-error");
+    }
+  }
   const stepCards = (run.response.steps || [])
     .map((step) => {
       const inputs = Object.entries(step.inputs || {})
@@ -1634,6 +1838,15 @@ function renderAiWorkflowResults(name) {
       const inputLine = inputs
         ? `<p class="muted text-xs">Inputs: ${inputs}</p>`
         : "";
+      const stepSummary = step.summary
+        ? `<p class="muted text-xs">Summary: ${escapeHtml(step.summary)}</p>`
+        : "";
+      const fallbackLine =
+        step.ai && step.ai.used_fallback && step.ai.fallback_reason
+          ? `<p class="text-error text-xs">Fallback: ${escapeHtml(
+              step.ai.fallback_reason
+            )}</p>`
+          : "";
       return `
         <div class="ai-step-card workflow-step">
           <div class="ai-step-header">
@@ -1643,6 +1856,8 @@ function renderAiWorkflowResults(name) {
             )}</span>
           </div>
           ${inputLine}
+          ${stepSummary}
+          ${fallbackLine}
           <div class="ai-nested-steps">${renderSqlStepList(
             step.steps || []
           )}</div>

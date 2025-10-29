@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable
+from typing import Any, Dict, Iterable, Mapping
 
 from openai import AzureOpenAI
 from openai import OpenAIError
@@ -87,6 +87,122 @@ class AssistantService:
             "raw": text,
             "metadata": metadata,
         }
+
+    def generate_task_sql(
+        self,
+        *,
+        task_name: str,
+        step_title: str,
+        instructions: str,
+        inputs: Mapping[str, Any],
+        default_sql: str,
+    ) -> Dict[str, Any]:
+        """Ask the assistant to draft SQL for a task step."""
+
+        system = (
+            "You craft SQLite queries for an observability investigation workbench. "
+            "Always return JSON with keys 'sql' (query text) and 'notes' (short rationale)."
+        )
+
+        context: list[str] = [
+            f"Task: {task_name}",
+            f"Step: {step_title}",
+        ]
+        if instructions:
+            context.append("Task instructions:\n" + instructions)
+        if inputs:
+            context.append("Rendered task inputs:\n" + json.dumps(inputs, indent=2))
+        context.append("Default SQL template:\n" + default_sql)
+
+        text, metadata = self._complete(system, "\n\n".join(context))
+        parsed = _coerce_response_json(text)
+        sql = _first_non_empty(
+            [
+                parsed.get("sql"),
+                parsed.get("query"),
+                parsed.get("statement"),
+                text.strip() if text.strip().upper().startswith("SELECT") else "",
+            ]
+        )
+        notes = _first_non_empty([
+            parsed.get("notes"),
+            parsed.get("explanation"),
+            parsed.get("rationale"),
+        ])
+        return {
+            "sql": sql or "",
+            "notes": notes or "",
+            "raw": text,
+            "metadata": metadata,
+        }
+
+    def summarise_task_result(
+        self,
+        *,
+        task_name: str,
+        instructions: str,
+        inputs: Mapping[str, Any],
+        rows: list[Mapping[str, Any]] | list[Any],
+        rowcount: int,
+    ) -> Dict[str, Any]:
+        """Produce a concise summary for a task result set."""
+
+        system = (
+            "You summarise SQLite query results for reliability engineers. "
+            "Respond with two or three short sentences."
+        )
+
+        preview_rows = rows[:5] if isinstance(rows, list) else []
+        user_parts = [f"Task: {task_name}"]
+        if instructions:
+            user_parts.append("Task instructions:\n" + instructions)
+        if inputs:
+            user_parts.append("Rendered inputs:\n" + json.dumps(inputs, indent=2))
+        user_parts.append(f"Row count: {rowcount}")
+        if preview_rows and isinstance(preview_rows[0], Mapping):
+            user_parts.append(
+                "Sample rows:\n" + json.dumps(preview_rows, indent=2, ensure_ascii=False)
+            )
+
+        text, metadata = self._complete(system, "\n\n".join(user_parts))
+        return {"summary": text.strip(), "metadata": metadata}
+
+    def summarise_workflow(
+        self,
+        *,
+        workflow_name: str,
+        instructions: str,
+        steps: Iterable[Mapping[str, Any]],
+    ) -> Dict[str, Any]:
+        """Ask the assistant to summarise an AI workflow run."""
+
+        system = (
+            "You create concise incident updates based on AI workflow runs. "
+            "Reply with bullet points describing key findings."
+        )
+
+        parts = [f"Workflow: {workflow_name}"]
+        if instructions:
+            parts.append("Workflow instructions:\n" + instructions)
+        step_descriptions = []
+        for step in steps:
+            task_name = step.get("task") or ""
+            summary = step.get("summary") or ""
+            rowcount = len(step.get("output") or []) if isinstance(step.get("output"), list) else 0
+            fallback = step.get("ai", {}).get("fallback_reason") if isinstance(step.get("ai"), Mapping) else None
+            description = [f"Task {task_name}"]
+            if rowcount:
+                description.append(f"rows={rowcount}")
+            if fallback:
+                description.append(f"fallback={fallback}")
+            if summary:
+                description.append(summary)
+            step_descriptions.append("; ".join(filter(None, description)))
+        if step_descriptions:
+            parts.append("Step notes:\n" + "\n".join(step_descriptions))
+
+        text, metadata = self._complete(system, "\n\n".join(parts))
+        return {"summary": text.strip(), "metadata": metadata}
 
     def suggest_rule(self, *, prompt: str, current_code: str, input_preview: str) -> Dict[str, Any]:
         system = (
