@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from flask import Flask
 
+from .ai import AGENT_MANAGER_EXTENSION_KEY, AgentManager
 from .assistants import (
     ASSISTANT_EXTENSION_KEY,
     AssistantServiceError,
@@ -32,6 +33,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
         except Exception as exc:  # pragma: no cover - defensive logging
             app.logger.exception("Failed to initialise assistant service")
     app.extensions[ASSISTANT_EXTENSION_KEY] = assistant_service
+
+    agent_manager = AgentManager(app_config)
+    app.extensions[AGENT_MANAGER_EXTENSION_KEY] = agent_manager
 
     # Seed the SQLite database on startup so the UI has data to display.
     ensure_database_seeded(app_config)
