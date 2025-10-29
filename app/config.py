@@ -14,6 +14,7 @@ from .blueprints import BlueprintRegistry
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+EXAMPLES_DIR = PROJECT_ROOT / "examples"
 
 
 def _default_storage_dir() -> Path:
@@ -251,17 +252,27 @@ class AppConfig:
     def _load_default_rules() -> tuple[PipelineRule, ...]:
         """Construct the default pipeline configuration."""
 
+        inputs_dir = EXAMPLES_DIR / "inputs"
+        legacy_inputs_dir = PROJECT_ROOT / "sample_inputs"
+        rules_dir = EXAMPLES_DIR / "transformation_rules"
+        legacy_rules_dir = PROJECT_ROOT / "sample_transformation_rules"
+
+        input_path = inputs_dir / "entities" / "api_current_status.json"
+        if not input_path.exists():
+            input_path = legacy_inputs_dir / "entities" / "api_current_status.json"
+
+        rule_path = rules_dir / "entitylist_transformation.rules"
+        if not rule_path.exists():
+            rule_path = (
+                legacy_rules_dir / "entitylist_transformation.rules"
+            )
+
         return (
             PipelineRule(
                 name="entities",
                 title="Entities",
-                input_path=PROJECT_ROOT
-                / "sample_inputs"
-                / "entities"
-                / "api_current_status.json",
-                rule_path=PROJECT_ROOT
-                / "sample_transformation_rules"
-                / "entitylist_transformation.rules",
+                input_path=input_path,
+                rule_path=rule_path,
                 table_name="entities",
                 table_type="preset",
                 description="Current inventory of monitors extracted from the API",

@@ -443,7 +443,11 @@ class BlueprintRegistry:
 
     def _resolve_rule_path(self, rule: str, base_dir: Path) -> Path:
         path = Path(rule)
-        candidates = self._candidate_paths(path, base_dir, subdir="sample_transformation_rules")
+        candidates = self._candidate_paths(
+            path,
+            base_dir,
+            subdirs=("examples/transformation_rules", "sample_transformation_rules"),
+        )
         for candidate in candidates:
             if candidate.exists():
                 return candidate
@@ -453,7 +457,11 @@ class BlueprintRegistry:
         if not value:
             return None
         path = Path(str(value))
-        candidates = self._candidate_paths(path, base_dir, subdir="sample_inputs")
+        candidates = self._candidate_paths(
+            path,
+            base_dir,
+            subdirs=("examples/inputs", "sample_inputs"),
+        )
         for candidate in candidates:
             if candidate.exists():
                 return candidate
@@ -469,14 +477,21 @@ class BlueprintRegistry:
             return (self.project_root / path).resolve()
         return (base_dir / path).resolve()
 
-    def _candidate_paths(self, path: Path, base_dir: Path, *, subdir: str) -> Iterable[Path]:
+    def _candidate_paths(
+        self, path: Path, base_dir: Path, *, subdirs: Sequence[str] | str
+    ) -> Iterable[Path]:
         if path.is_absolute():
             yield path
             return
 
         yield (base_dir / path).resolve()
         yield (self.project_root / path).resolve()
-        yield (self.project_root / subdir / path).resolve()
+        if isinstance(subdirs, str):
+            directories: Sequence[str] = (subdirs,)
+        else:
+            directories = subdirs
+        for subdir in directories:
+            yield (self.project_root / subdir / path).resolve()
 
     def _relative(self, path: Path) -> str:
         try:

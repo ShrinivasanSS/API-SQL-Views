@@ -36,9 +36,9 @@ Apart from that we will have Custom tables.
 
 ### Observability Concepts and Table mapping
 
-You can find the API data in the sample_inputs/ folder and the respective table needed in sample_outputs/ folder. 
+You can find the API data in the examples/inputs/ folder and the respective table needed in examples/outputs/ folder.
 
-These are limited, focused tables - for Phase 1 of the project. Assume that the transformations/ folder contains the rules for transformation and will be updated regularly to match the requirements for new entity types. 
+These are limited, focused tables - for Phase 1 of the project. Assume that the examples/transformation_rules/ folder contains the rules for transformation and will be updated regularly to match the requirements for new entity types.
 
 The Transformed data will be loaded on the SQLite db, flushing any existing data and be readily available for querying. 
 

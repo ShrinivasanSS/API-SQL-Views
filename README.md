@@ -47,17 +47,20 @@ app/
   routes.py              # Flask blueprints for UI and REST API
   static/                # CSS + JavaScript for the three-pane UI
   templates/index.html   # Base layout
-blueprints/              # Blueprint registry CSV + YAML definitions
-sample_inputs/           # Cached API responses (extraction stage)
-sample_transformation_rules/
-                        # pandas-based rule snippets (transformation stage)
+examples/
+  inputs/               # Cached API responses (extraction stage)
+  outputs/              # Example table snapshots for reference
+  source_rules/         # Blueprint-managed rule bundles
+  transformation_rules/ # pandas-based rule snippets (transformation stage)
 storage/                 # Generated SQLite database and custom rules
 ```
 
-The AI task and workflow definitions live in `seed.yaml`. At start-up the file
-is parsed into `AppConfig`, which initialises the ETL pipeline, exposes the AI
-catalogue, and (when Azure OpenAI credentials are provided) configures the
-assistant service that powers AI mode in the inspectors.
+The pipeline configuration lives in `app/config.py`. Each `PipelineRule` entry
+references a JSON payload and a transformation rule. Adding new entity types is
+as easy as dropping a new payload and rule file in the relevant folders under
+`examples/` and extending the configuration tuple. Blueprint metadata is stored under
+`blueprints/` with a `blueprints.csv` registry and one YAML file per entity
+type.
 
 ## Getting started
 
