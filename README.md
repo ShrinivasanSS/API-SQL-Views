@@ -93,14 +93,36 @@ tasks and workflows.
 
 ## Working in the inspectors
 
-- **SQL Workbench (Tables view)**: continue to choose between raw SQL and
-  natural-language prompting for ad hoc questions.
-- **AI Tasks**: select Query mode to execute the saved SQL steps verbatim or
-  switch to AI mode to let the assistant generate and run a bespoke statement.
-  The UI records the AI suggestion, shows whether a fallback occurred, and
-  renders the generated summary.
-- **AI Workflows**: the top-level toggle applies to every step in the chain and
-  exposes per-task summaries, SQL, and any fallback warnings.
+- All transformed tables are stored in `storage/observability.db`. Delete this
+  file if you want a completely clean rebuild.
+- Custom transformation rules created from the UI are persisted under
+  `storage/user_rules/` and automatically appear in the rule listing.
+- The application uses the `jq` Python package to evaluate JQ expressions
+  against cached API payloads so that analysts can explore responses directly
+  from the browser.
+- Cached API payloads created via the upload endpoint are stored in the
+  project-root `.cache/` directory so they can be referenced by transformation
+  rules without committing large fixtures to source control.
+- Uploaded blueprint YAML files live under `.uploads/`; any file placed in this
+  directory is merged into the runtime blueprint registry alongside the entries
+  defined in `blueprints/blueprints.csv`.
+
+## Uploading blueprints and cached payloads
+
+The Blueprint Catalogue view now exposes an upload panel for YAML blueprints
+and JSON payloads. Select one or more files and submit them to persist the
+artifacts on disk:
+
+- `.yaml`/`.yml` files are saved in `.uploads/` (nested folders are supported).
+  The entity type is derived from the YAML content and automatically added to
+  the in-memory registry unless a CSV-sourced blueprint already uses the same
+  identifier. Updating a previously uploaded blueprint simply overwrites the
+  existing file.
+- `.json` files are copied into `.cache/` so transformation rules can reference
+  the payloads without manual file system access.
+
+After uploading new blueprints, rerun the ETL pipeline from the UI to materialise
+the additional tables in SQLite.
 
 ## Roadmap
 

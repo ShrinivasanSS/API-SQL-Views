@@ -170,6 +170,7 @@ class AppConfig:
     database_path: Path
     storage_dir: Path
     cache_dir: Path
+    uploads_dir: Path
     pipeline_rules: tuple[PipelineRule, ...]
     credentials: Dict[str, str]
     blueprint_registry: BlueprintRegistry
@@ -186,6 +187,9 @@ class AppConfig:
         cache_dir = (PROJECT_ROOT / ".cache").resolve()
         cache_dir.mkdir(parents=True, exist_ok=True)
 
+        uploads_dir = (PROJECT_ROOT / ".uploads").resolve()
+        uploads_dir.mkdir(parents=True, exist_ok=True)
+
         # Demo credentials – defaults are safe placeholders that can be
         # overridden locally without affecting version control.
         credentials = {
@@ -199,6 +203,7 @@ class AppConfig:
         blueprints = BlueprintRegistry.from_csv(
             PROJECT_ROOT / "blueprints" / "blueprints.csv",
             project_root=PROJECT_ROOT,
+            uploads_dir=uploads_dir,
         )
 
         tasks, workflows = cls._load_ai_definitions()
@@ -222,6 +227,7 @@ class AppConfig:
             database_path=database_path,
             storage_dir=storage,
             cache_dir=cache_dir,
+            uploads_dir=uploads_dir,
             pipeline_rules=rules,
             credentials=credentials,
             blueprint_registry=blueprints,
@@ -239,6 +245,7 @@ class AppConfig:
             "CREDENTIALS": self.credentials,
             "BLUEPRINTS": self.blueprint_registry.describe(),
             "CACHE_DIR": str(self.cache_dir),
+            "UPLOADS_DIR": str(self.uploads_dir),
         }
         if self.azure_openai:
             config["AZURE_OPENAI"] = self.azure_openai.as_dict()
