@@ -11,7 +11,7 @@ Make the ETL fully **blueprint-driven**. For each `EntityType`, a YAML blueprint
 
 This phase adds **Events** as a first-class pillar. Unlike other pillars, all Events come from one shared API; only the **query** (filters + time range) varies by entity.
 
-> **Implementation note:** For the offline prototype we attach `sample_input` hints to each blueprint source. These point to cached JSON payloads under `sample_inputs/` and keep the ETL runnable without live API access. Future phases can drop the hint in favour of real extractors.
+> **Implementation note:** For the offline prototype we attach `sample_input` hints to each blueprint source. These point to cached JSON payloads under `examples/inputs/` and keep the ETL runnable without live API access. Future phases can drop the hint in favour of real extractors.
 
 ---
 
@@ -59,8 +59,8 @@ defaults:
 metrics:
   - type: isp_tabular
     api: /app/api/isp/tabulardetails/{monitor_id}
-    sample_input: sample_inputs/metrics/api_isp_tabular_details_15698000397185121.json
-    transform_rules: [sample_transformation_rules/ISP/isp_tabulardata_metric_transformation.rules]
+    sample_input: examples/inputs/metrics/api_isp_tabular_details_15698000397185121.json
+    transform_rules: [examples/transformation_rules/ISP/isp_tabulardata_metric_transformation.rules]
     inputs:
       metric_units:
         packet_loss: "%"
@@ -75,16 +75,16 @@ metrics:
 traces:
   - type: traceroute
     api: /api/isp/traceroute/{monitor_id}
-    sample_input: sample_inputs/traces/api_isp_traceroute_15698000397185121.json
-    transform_rules: [sample_transformation_rules/ISP/isp_trace_transformation.rules]
+    sample_input: examples/inputs/traces/api_isp_traceroute_15698000397185121.json
+    transform_rules: [examples/transformation_rules/ISP/isp_trace_transformation.rules]
     load:
       table: Traces
 
 logs:
   - type: availability_log
     api: /api/reports/log_reports/{monitor_id}?date={today}
-    sample_input: sample_inputs/logs/api_isp_15698000397185121_logreport.json
-    transform_rules: [sample_transformation_rules/ISP/isp_logreport_transformation.rules]
+    sample_input: examples/inputs/logs/api_isp_15698000397185121_logreport.json
+    transform_rules: [examples/transformation_rules/ISP/isp_logreport_transformation.rules]
     load:
       table: Logs
 
@@ -102,7 +102,7 @@ events:
       # range format: "{start_index}-{end_index}" e.g., "1-100"
       # Provider-specific query parameter name for the filter:
       query_param: q
-    sample_input: sample_inputs/events/api_isp_infrastructure_events.json
+    sample_input: examples/inputs/events/api_isp_infrastructure_events.json
     pagination:
       page_size: 100                # chunk size for range window
       start_index: 1                # first index (inclusive)
@@ -110,7 +110,7 @@ events:
     schedule:
       lookback: "24h"               # default rolling window when not specified by workflow
       align_to: "now"               # or "hour", "day"
-    transform_rules: [sample_transformation_rules/eventlogs_transformation.rules]
+    transform_rules: [examples/transformation_rules/eventlogs_transformation.rules]
     inputs:
       event_type: Infrastructure
     load:
