@@ -7,7 +7,14 @@ import sqlite3
 import re
 from typing import Any, Dict, Iterable, Mapping
 
-from .config import AITaskDefinition, AIWorkflowDefinition, AppConfig, TaskInputField, TaskStep
+from .assistants import AssistantService
+from .config import (
+    AITaskDefinition,
+    AIWorkflowDefinition,
+    AppConfig,
+    TaskInputField,
+    TaskStep,
+)
 
 
 AGENT_MANAGER_EXTENSION_KEY = "ai_agent_manager"
@@ -70,17 +77,24 @@ class AgentManager:
         *,
         inputs: Mapping[str, Any] | None = None,
         instructions_override: str | None = None,
+        mode: str | None = None,
+        assistant_service: AssistantService | None = None,
     ) -> Dict[str, Any]:
         task = self.get_task(name)
         resolved_inputs = self._resolve_inputs(task.inputs, inputs)
-        steps = self._run_task_steps(task, resolved_inputs)
         instructions = (instructions_override or task.instructions or "").strip()
+        execution = self._execute_task_definition(
+            task,
+            resolved_inputs,
+            instructions,
+            mode,
+            assistant_service,
+        )
         return {
             "task": task.to_metadata(),
             "inputs": resolved_inputs,
             "instructions": instructions,
-            "steps": steps["steps"],
-            "output": steps["output"],
+            **execution,
         }
 
     def execute_workflow(
@@ -89,16 +103,26 @@ class AgentManager:
         *,
         inputs: Mapping[str, Any] | None = None,
         instructions_override: str | None = None,
+        mode: str | None = None,
+        assistant_service: AssistantService | None = None,
     ) -> Dict[str, Any]:
         workflow = self.get_workflow(name)
         resolved_inputs = self._resolve_inputs(workflow.inputs, inputs)
         context: Dict[str, Any] = _SafeFormatDict({**resolved_inputs})
         self._inject_default_tables(context)
         workflow_steps: list[Dict[str, Any]] = []
+        normalised_mode = self._normalise_mode(mode)
 
         for index, step in enumerate(workflow.steps, start=1):
             mapped_inputs = self._render_step_inputs(step.input_map, context)
-            task_result = self._run_task_steps(self.get_task(step.task), mapped_inputs)
+            task_definition = self.get_task(step.task)
+            task_result = self._execute_task_definition(
+                task_definition,
+                mapped_inputs,
+                (task_definition.instructions or "").strip(),
+                normalised_mode,
+                assistant_service,
+            )
             workflow_steps.append(
                 {
                     "task": step.task,
@@ -106,6 +130,9 @@ class AgentManager:
                     "inputs": mapped_inputs,
                     "steps": task_result["steps"],
                     "output": task_result["output"],
+                    "summary": task_result.get("summary"),
+                    "mode": task_result.get("mode", normalised_mode),
+                    "ai": task_result.get("ai"),
                 }
             )
 
@@ -123,16 +150,32 @@ class AgentManager:
             })
             self._apply_entity_context(step.task, task_result["output"], context)
 
-        summary = self._summarise_workflow(workflow, workflow_steps)
+        if normalised_mode == "ai":
+            if assistant_service is None:
+                raise AgentExecutionError("AI mode requires an assistant service")
+            summary_payload = assistant_service.summarise_workflow(
+                workflow_name=workflow.title or workflow.name,
+                instructions=(instructions_override or workflow.instructions or "").strip(),
+                steps=workflow_steps,
+            )
+            summary = summary_payload.get("summary", "")
+            ai_metadata = {"summary_metadata": summary_payload.get("metadata"), "fallback_messages": self._collect_workflow_fallbacks(workflow_steps)}
+        else:
+            summary = self._summarise_workflow(workflow, workflow_steps)
+            ai_metadata = None
         instructions = (instructions_override or workflow.instructions or "").strip()
 
-        return {
+        result: Dict[str, Any] = {
             "workflow": workflow.to_metadata(),
             "inputs": resolved_inputs,
             "instructions": instructions,
             "steps": workflow_steps,
             "summary": summary,
+            "mode": normalised_mode,
         }
+        if ai_metadata:
+            result["ai"] = ai_metadata
+        return result
 
     # --------------------------
     # Internal helpers
@@ -150,6 +193,30 @@ class AgentManager:
             resolved[field.name] = "" if value is None else str(value)
         return resolved
 
+    def _execute_task_definition(
+        self,
+        task: AITaskDefinition,
+        inputs: Mapping[str, Any],
+        instructions: str,
+        mode: str | None,
+        assistant_service: AssistantService | None,
+    ) -> Dict[str, Any]:
+        normalised_mode = self._normalise_mode(mode)
+        if normalised_mode == "ai":
+            if assistant_service is None:
+                raise AgentExecutionError("AI mode requires an assistant service")
+            return self._run_task_ai_mode(task, inputs, instructions, assistant_service)
+        result = self._run_task_steps(task, inputs)
+        result["mode"] = "query"
+        return result
+
+    @staticmethod
+    def _normalise_mode(mode: str | None) -> str:
+        value = (mode or "query").lower()
+        if value not in {"query", "ai"}:
+            raise AgentExecutionError(f"Unsupported execution mode: {mode}")
+        return value
+
     def _run_task_steps(
         self, task: AITaskDefinition, inputs: Mapping[str, Any]
     ) -> Dict[str, Any]:
@@ -157,22 +224,129 @@ class AgentManager:
         last_output: Any = ["No output"]
         for step in task.steps:
             result = self._execute_sql_step(step, inputs)
+            result["mode"] = "query"
+            result["summary"] = self._summarise_rows(result.get("rows"))
             step_results.append(result)
             if result.get("rows"):
                 last_output = result["rows"]
             elif result.get("error"):
                 last_output = ["No output"]
-        return {"steps": step_results, "output": last_output}
+        return {
+            "steps": step_results,
+            "output": last_output,
+            "summary": self._summarise_rows(last_output),
+        }
+
+    def _run_task_ai_mode(
+        self,
+        task: AITaskDefinition,
+        inputs: Mapping[str, Any],
+        instructions: str,
+        assistant_service: AssistantService,
+    ) -> Dict[str, Any]:
+        step_results: list[Dict[str, Any]] = []
+        last_output: Any = ["No output"]
+        fallback_messages: list[str] = []
+        for step in task.steps:
+            try:
+                default_sql = self._render_sql(step.sql, inputs)
+            except AgentExecutionError:
+                default_sql = step.sql
+
+            generation = assistant_service.generate_task_sql(
+                task_name=task.title or task.name,
+                step_title=step.title or step.sql[:30],
+                instructions=instructions,
+                inputs=dict(inputs),
+                default_sql=default_sql,
+            )
+            generated_sql = (generation.get("sql") or "").strip()
+            notes = generation.get("notes") or ""
+            step_result: Dict[str, Any]
+            fallback_reason: str | None = None
+
+            if generated_sql:
+                step_result = self._execute_sql_step(
+                    step,
+                    inputs,
+                    sql_override=generated_sql,
+                    assume_rendered=True,
+                )
+                executed_rows = step_result.get("rows") or []
+                if step_result.get("error") or not executed_rows:
+                    fallback_reason = step_result.get("error") or "AI query returned no rows"
+                    fallback_messages.append(
+                        f"{step.title or step.sql[:30]}: {fallback_reason}. Default query executed."
+                    )
+                    step_result = self._execute_sql_step(step, inputs)
+                else:
+                    step_result["sql"] = generated_sql
+            else:
+                fallback_reason = "Assistant did not provide SQL; default query executed"
+                fallback_messages.append(f"{step.title or step.sql[:30]}: {fallback_reason}.")
+                step_result = self._execute_sql_step(step, inputs)
+
+            if step_result.get("rows"):
+                last_output = step_result["rows"]
+            elif step_result.get("error"):
+                last_output = ["No output"]
+
+            step_result["mode"] = "ai"
+            step_result["summary"] = self._summarise_rows(step_result.get("rows"))
+            step_result["generated_sql"] = generated_sql or None
+            step_result["default_sql"] = default_sql
+            step_result["ai"] = {
+                "generated_sql": generated_sql or None,
+                "notes": notes or None,
+                "default_sql": default_sql,
+                "used_fallback": bool(fallback_reason),
+                "fallback_reason": fallback_reason,
+            }
+            step_results.append(step_result)
+
+        rowcount = len(last_output) if isinstance(last_output, list) else 0
+        summary_payload = assistant_service.summarise_task_result(
+            task_name=task.title or task.name,
+            instructions=instructions,
+            inputs=dict(inputs),
+            rows=last_output if isinstance(last_output, list) else [],
+            rowcount=rowcount,
+        )
+        summary_text = summary_payload.get("summary", "")
+
+        return {
+            "steps": step_results,
+            "output": last_output,
+            "summary": summary_text,
+            "mode": "ai",
+            "ai": {
+                "summary_metadata": summary_payload.get("metadata"),
+                "fallback_messages": fallback_messages,
+            },
+        }
 
     def _execute_sql_step(
-        self, step: TaskStep, params: Mapping[str, Any]
+        self,
+        step: TaskStep,
+        params: Mapping[str, Any],
+        *,
+        sql_override: str | None = None,
+        assume_rendered: bool = False,
     ) -> Dict[str, Any]:
+        template_sql = step.sql
         try:
-            sql = self._render_sql(step.sql, params)
+            if sql_override is not None:
+                if assume_rendered:
+                    sql = sql_override
+                else:
+                    sql = self._render_sql(sql_override, params)
+            else:
+                sql = self._render_sql(step.sql, params)
         except AgentExecutionError as exc:
             return {
                 "title": step.title,
-                "sql": step.sql,
+                "sql": template_sql,
+                "template_sql": template_sql,
                 "columns": [],
                 "rows": ["No output"],
                 "rowcount": 0,
@@ -189,6 +363,7 @@ class AgentManager:
             return {
                 "title": step.title,
                 "sql": sql,
+                "template_sql": template_sql,
                 "columns": [],
                 "rows": ["No output"],
                 "rowcount": 0,
@@ -203,12 +378,39 @@ class AgentManager:
         return {
             "title": step.title,
             "sql": sql,
+            "template_sql": template_sql,
             "columns": columns,
             "rows": rows,
             "rowcount": len(rows),
             "error": None,
             "preview": preview_text,
         }
+
+    @staticmethod
+    def _summarise_rows(rows: Any) -> str:
+        if isinstance(rows, list):
+            if not rows:
+                return "No rows returned"
+            first = rows[0]
+            if isinstance(first, Mapping):
+                return f"{len(rows)} row(s)"
+            return ", ".join(str(item) for item in rows[:3])
+        return "No output"
+
+    @staticmethod
+    def _collect_workflow_fallbacks(steps: Iterable[Mapping[str, Any]]) -> list[str]:
+        messages: list[str] = []
+        for step in steps:
+            ai_metadata = step.get("ai") if isinstance(step, Mapping) else None
+            if not isinstance(ai_metadata, Mapping):
+                continue
+            if ai_metadata.get("used_fallback") and ai_metadata.get("fallback_reason"):
+                task_name = step.get("task") if isinstance(step, Mapping) else None
+                if task_name:
+                    messages.append(f"{task_name}: {ai_metadata['fallback_reason']}")
+                else:
+                    messages.append(str(ai_metadata["fallback_reason"]))
+        return messages
 
     @staticmethod
     def _render_step_inputs(

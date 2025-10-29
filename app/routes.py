@@ -182,14 +182,23 @@ def execute_ai_task(name: str) -> Response:
     payload = request.get_json(silent=True) or {}
     inputs = payload.get("inputs") if isinstance(payload.get("inputs"), dict) else {}
     instructions_override = payload.get("instructions")
+    mode = payload.get("mode")
+    assistant_service = current_app.extensions.get(ASSISTANT_EXTENSION_KEY)
     try:
         result = manager.execute_task(
             name,
             inputs=inputs,
             instructions_override=instructions_override,
+            mode=mode,
+            assistant_service=assistant_service,
         )
     except AgentExecutionError as exc:
-        return jsonify({"error": str(exc)}), 404
+        message = str(exc)
+        if "Unknown AI task" in message:
+            return jsonify({"error": message}), 404
+        if "assistant service" in message.lower():
+            return jsonify({"error": message}), 503
+        return jsonify({"error": message}), 400
     return jsonify(result)
 
 
@@ -225,14 +234,23 @@ def execute_ai_workflow(name: str) -> Response:
     payload = request.get_json(silent=True) or {}
     inputs = payload.get("inputs") if isinstance(payload.get("inputs"), dict) else {}
     instructions_override = payload.get("instructions")
+    mode = payload.get("mode")
+    assistant_service = current_app.extensions.get(ASSISTANT_EXTENSION_KEY)
     try:
         result = manager.execute_workflow(
             name,
             inputs=inputs,
             instructions_override=instructions_override,
+            mode=mode,
+            assistant_service=assistant_service,
         )
     except AgentExecutionError as exc:
-        return jsonify({"error": str(exc)}), 404
+        message = str(exc)
+        if "Unknown AI workflow" in message:
+            return jsonify({"error": message}), 404
+        if "assistant service" in message.lower():
+            return jsonify({"error": message}), 503
+        return jsonify({"error": message}), 400
     return jsonify(result)
 
 
