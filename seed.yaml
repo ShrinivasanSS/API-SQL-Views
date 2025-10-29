@@ -142,12 +142,18 @@ ai_tasks:
     instructions: |
       You help SREs review the latest events for an entity. Produce SQL that
       filters by EntityID and orders records chronologically so analysts can
-      scan what happened most recently.
+      scan what happened most recently. Use the provided table input when
+      selecting from the events dataset.
     inputs:
       - name: entity_id
         label: Entity ID
         placeholder: e.g. router-12
         description: Identifier of the entity to inspect.
+      - name: events_table
+        label: Events table
+        placeholder: e.g. isp_events
+        description: Optional override for the events table to query.
+        default: events
       - name: limit
         label: Row limit
         placeholder: 25
@@ -161,7 +167,7 @@ ai_tasks:
                  EventType,
                  Message,
                  Source
-            FROM events
+           FROM {events_table}
            WHERE EntityID = :entity_id
            ORDER BY datetime(EventTime) DESC
            LIMIT COALESCE(NULLIF(:limit, ''), 25)
@@ -170,12 +176,18 @@ ai_tasks:
     description: Surface the latest raw log statements for an entity.
     instructions: |
       Extract raw log lines for the provided entity. Use descending collection
-      time so the newest activity appears first.
+      time so the newest activity appears first. Use the provided table input
+      when selecting from the logs dataset.
     inputs:
       - name: entity_id
         label: Entity ID
         placeholder: e.g. router-12
         description: Identifier of the entity to inspect.
+      - name: logs_table
+        label: Logs table
+        placeholder: e.g. isp_logs
+        description: Optional override for the logs table to query.
+        default: logs
       - name: limit
         label: Row limit
         placeholder: 50
@@ -187,7 +199,7 @@ ai_tasks:
           SELECT collection_time,
                  status,
                  details
-            FROM logs
+           FROM {logs_table}
            WHERE entity_id = :entity_id
            ORDER BY datetime(collection_time) DESC
            LIMIT COALESCE(NULLIF(:limit, ''), 50)
@@ -196,12 +208,18 @@ ai_tasks:
     description: Collect metric samples tied to an entity across dimensions.
     instructions: |
       Retrieve metric observations for an entity. Group by metric name and sort
-      by the newest sample to keep related readings together.
+      by the newest sample to keep related readings together. Use the provided
+      table input when selecting from the metrics dataset.
     inputs:
       - name: entity_id
         label: Entity ID
         placeholder: e.g. router-12
         description: Identifier of the entity to inspect.
+      - name: metrics_table
+        label: Metrics table
+        placeholder: e.g. isp_metrics
+        description: Optional override for the metrics table to query.
+        default: metrics
       - name: limit
         label: Row limit
         placeholder: 100
@@ -215,7 +233,7 @@ ai_tasks:
                  MetricUnit,
                  TimeWindow,
                  EntityInstance
-            FROM metrics
+           FROM {metrics_table}
            WHERE EntityID = :entity_id
            ORDER BY MetricName ASC, datetime(TimeWindow) DESC
            LIMIT COALESCE(NULLIF(:limit, ''), 100)
@@ -225,12 +243,18 @@ ai_tasks:
     instructions: |
       Retrieve spans recorded for the entity, ordered by hop to reflect the
       observed path. Include duration information so analysts can quickly spot
-      slow segments.
+      slow segments. Use the provided table input when selecting from the
+      traces dataset.
     inputs:
       - name: entity_id
         label: Entity ID
         placeholder: e.g. router-12
         description: Identifier of the entity to inspect.
+      - name: traces_table
+        label: Traces table
+        placeholder: e.g. isp_traces
+        description: Optional override for the traces table to query.
+        default: traces
       - name: limit
         label: Row limit
         placeholder: 50
@@ -244,7 +268,7 @@ ai_tasks:
                  Hop,
                  Target,
                  DurationMs
-            FROM traces
+           FROM {traces_table}
            WHERE EntityID = :entity_id
            ORDER BY Hop ASC
            LIMIT COALESCE(NULLIF(:limit, ''), 50)
@@ -264,19 +288,26 @@ ai_workflows:
         placeholder: e.g. router-12
         description: Identifier of the entity to review.
     steps:
+      - task: findEntities
+        input_map:
+          query: "{entity_id}"
       - task: fetchEvents
         input_map:
           entity_id: "{entity_id}"
+          events_table: "{events_table}"
           limit: "20"
       - task: fetchMetrics
         input_map:
           entity_id: "{entity_id}"
+          metrics_table: "{metrics_table}"
           limit: "50"
       - task: fetchLogs
         input_map:
           entity_id: "{entity_id}"
+          logs_table: "{logs_table}"
           limit: "50"
       - task: fetchTraces
         input_map:
           entity_id: "{entity_id}"
+          traces_table: "{traces_table}"
           limit: "50"

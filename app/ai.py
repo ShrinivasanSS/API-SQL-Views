@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import re
 from typing import Any, Dict, Iterable, Mapping
 
 from .config import AITaskDefinition, AIWorkflowDefinition, AppConfig, TaskInputField, TaskStep
@@ -11,6 +12,13 @@ from .config import AITaskDefinition, AIWorkflowDefinition, AppConfig, TaskInput
 
 AGENT_MANAGER_EXTENSION_KEY = "ai_agent_manager"
 _CONTEXT_CHAR_LIMIT = 100_000
+_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_DEFAULT_TABLE_INPUTS = {
+    "events_table": "events",
+    "logs_table": "logs",
+    "metrics_table": "metrics",
+    "traces_table": "traces",
+}
 
 
 class AgentExecutionError(RuntimeError):
@@ -85,6 +93,7 @@ class AgentManager:
         workflow = self.get_workflow(name)
         resolved_inputs = self._resolve_inputs(workflow.inputs, inputs)
         context: Dict[str, Any] = _SafeFormatDict({**resolved_inputs})
+        self._inject_default_tables(context)
         workflow_steps: list[Dict[str, Any]] = []
 
         for index, step in enumerate(workflow.steps, start=1):
@@ -112,6 +121,7 @@ class AgentManager:
                 "last_rows": task_result["output"],
                 "last_first_row": first_row,
             })
+            self._apply_entity_context(step.task, task_result["output"], context)
 
         summary = self._summarise_workflow(workflow, workflow_steps)
         instructions = (instructions_override or workflow.instructions or "").strip()
@@ -158,15 +168,27 @@ class AgentManager:
         self, step: TaskStep, params: Mapping[str, Any]
     ) -> Dict[str, Any]:
         try:
+            sql = self._render_sql(step.sql, params)
+        except AgentExecutionError as exc:
+            return {
+                "title": step.title,
+                "sql": step.sql,
+                "columns": [],
+                "rows": ["No output"],
+                "rowcount": 0,
+                "error": str(exc),
+                "preview": "No output",
+            }
+        try:
             with sqlite3.connect(self._config.database_path) as conn:
                 conn.row_factory = sqlite3.Row
-                cursor = conn.execute(step.sql, params)
+                cursor = conn.execute(sql, params)
                 rows = [dict(row) for row in cursor.fetchall()]
                 columns = [description[0] for description in cursor.description or []]
         except sqlite3.Error as exc:
             return {
                 "title": step.title,
-                "sql": step.sql,
+                "sql": sql,
                 "columns": [],
                 "rows": ["No output"],
                 "rowcount": 0,
@@ -180,7 +202,7 @@ class AgentManager:
 
         return {
             "title": step.title,
-            "sql": step.sql,
+            "sql": sql,
             "columns": columns,
             "rows": rows,
             "rowcount": len(rows),
@@ -197,6 +219,75 @@ class AgentManager:
         for key, value in input_map.items():
             rendered[key] = str(value).format_map(safe_context)
         return rendered
+
+    def _inject_default_tables(self, context: Dict[str, Any]) -> None:
+        for key, value in _DEFAULT_TABLE_INPUTS.items():
+            context.setdefault(key, value)
+
+    def _apply_entity_context(
+        self, task_name: str, output: Any, context: Dict[str, Any]
+    ) -> None:
+        if task_name not in {"findEntities", "fetchEntities"}:
+            return
+        if not isinstance(output, list) or not output:
+            return
+        first_row = output[0]
+        if not isinstance(first_row, Mapping):
+            return
+        entity_type = str(first_row.get("EntityType") or "").strip()
+        entity_id = str(first_row.get("EntityID") or "").strip()
+        if entity_type:
+            context["entity_type"] = entity_type
+            context.update(self._resolve_blueprint_tables(entity_type))
+        if entity_id and not context.get("entity_id"):
+            context["entity_id"] = entity_id
+
+    def _resolve_blueprint_tables(self, entity_type: str | None) -> Dict[str, str]:
+        tables = dict(_DEFAULT_TABLE_INPUTS)
+        if not entity_type:
+            return tables
+        blueprint = self._config.blueprint_registry.get(entity_type)
+        if blueprint is None:
+            return tables
+        for table in blueprint.iter_tables():
+            key = f"{table.type}_table"
+            name = getattr(table, "table_name", "")
+            if key in tables and name:
+                tables[key] = str(name)
+        return tables
+
+    def _render_sql(self, template: str, params: Mapping[str, Any]) -> str:
+        if "{" not in template or "}" not in template:
+            return template
+        placeholders = set(re.findall(r"{([A-Za-z_][A-Za-z0-9_]*)}", template))
+        if not placeholders:
+            return template
+        values: Dict[str, str] = {}
+        for key in placeholders:
+            raw = params.get(key)
+            if raw is None or str(raw).strip() == "":
+                raise AgentExecutionError(
+                    f"Task input '{key}' must be provided to render the SQL query"
+                )
+            values[key] = self._sanitize_identifier(raw)
+        try:
+            return template.format(**values)
+        except KeyError as exc:  # pragma: no cover - defensive
+            missing = exc.args[0] if exc.args else "unknown"
+            raise AgentExecutionError(
+                f"Missing template value for '{missing}'"
+            ) from exc
+
+    @staticmethod
+    def _sanitize_identifier(value: Any) -> str:
+        identifier = str(value).strip()
+        if not identifier:
+            raise AgentExecutionError("Table identifier cannot be empty")
+        if not _IDENTIFIER_PATTERN.match(identifier):
+            raise AgentExecutionError(
+                "Table identifier must contain only letters, numbers, or underscores"
+            )
+        return identifier
 
     @staticmethod
     def _truncate_text(value: str) -> str:
